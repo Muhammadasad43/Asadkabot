@@ -204,52 +204,6 @@
         /* 🛠️ Pull-to-refresh mechanism block karne ke liye */
 html, body {
     overscroll-behavior-y: contain; /* Yeh circular refresh ko permanent block kar dega app ke andar */
-}
-
-/* ⚡ ARROWS OVERLAY STYLING */
-#mobile-scroll-controls {
-    position: absolute;
-    right: 15px;
-    top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    z-index: 9999; /* Chat ke upar rahega */
-}
-
-.scroll-arrow-btn {
-    background: rgba(37, 99, 235, 0.05); /* Default: Boht hi low opacity overlay */
-    border: 1px solid rgba(37, 99, 235, 0.1);
-    color: rgba(56, 189, 248, 0.15); /* Boht halka blue text */
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    font-size: 1.2rem;
-    font-weight: bold;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-    transition: all 0.1s ease;
-}
-
-/* 🎯 Jab user unki location par click/hold karega tabhi active blue glow show hoga */
-.scroll-arrow-btn:active {
-    background: rgba(37, 99, 235, 0.8) !important;
-    color: #ffffff !important;
-    border-color: #38bdf8 !important;
-    box-shadow: 0 0 15px rgba(37, 99, 235, 0.8);
-    transform: scale(1.1);
-}
-
-/* Mobile responsive alignment adjustment */
-@media (max-width: 768px) {
-    #mobile-scroll-controls {
-        right: 10px;
-    }
 }                                   
     </style>
 </head>
@@ -288,11 +242,6 @@ html, body {
             <span style="color:#22c55e; font-size:0.75rem; font-weight:bold;">● Active Server</span>
         </div>
 <div class="chat-history-wrapper">
-    <div id="mobile-scroll-controls">
-    <button class="scroll-arrow-btn" onclick="singleClickScroll(-150)" onmousedown="startContinuousScroll(-10)" onmouseup="stopContinuousScroll()" ontouchstart="startContinuousScroll(-10)" ontouchend="stopContinuousScroll()">▲</button>
-    <button class="scroll-arrow-btn" onclick="singleClickScroll(150)" onmousedown="startContinuousScroll(10)" onmouseup="stopContinuousScroll()" ontouchstart="startContinuousScroll(10)" ontouchend="stopContinuousScroll()">▼</button>
-</div>
-
     <div class="chat-history-bg"></div>
     <div class="chat-history" id="chat-box">
                 <div class="msg-row" style="align-items: flex-start;">
@@ -661,33 +610,7 @@ html, body {
 
         function escapeHtml(text) {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        }
-        let scrollInterval = null;
-let isHolding = false;
-
-function startContinuousScroll(direction) {
-    const chatBox = document.getElementById('chat-box');
-    if (!chatBox) return;
-    
-    // Kisi bhi chalte hue click event ko fresh karne ke liye
-    isHolding = false; 
-    
-    // Hold delay: 120ms tak hold karne par fast stream loop activate hoga
-    scrollInterval = setTimeout(() => {
-        isHolding = true;
-        scrollInterval = setInterval(() => {
-            chatBox.scrollTop += direction;
-        }, 10); // Hold par fast aur smooth manual navigation bina framework crash ke
-    }, 120);
-}
-
-function stopContinuousScroll() {
-    if (scrollInterval) {
-        clearTimeout(scrollInterval);
-        clearInterval(scrollInterval);
-        scrollInterval = null;
-    }
-}
+        }    
     </script>
 </body>
 </html>
