@@ -283,9 +283,9 @@ html, body {
         </div>
 <div class="chat-history-wrapper">
     <div id="mobile-scroll-controls">
-        <button class="scroll-arrow-btn" id="scroll-up-btn" onmousedown="startContinuousScroll(-8)" onmouseup="stopContinuousScroll()" ontouchstart="startContinuousScroll(-8)" ontouchend="stopContinuousScroll()">▲</button>
-        <button class="scroll-arrow-btn" id="scroll-down-btn" onmousedown="startContinuousScroll(8)" onmouseup="stopContinuousScroll()" ontouchstart="startContinuousScroll(8)" ontouchend="stopContinuousScroll()">▼</button>
-    </div>
+    <button class="scroll-arrow-btn" onclick="singleClickScroll(-150)" onmousedown="startContinuousScroll(-10)" onmouseup="stopContinuousScroll()" ontouchstart="startContinuousScroll(-10)" ontouchend="stopContinuousScroll()">▲</button>
+    <button class="scroll-arrow-btn" onclick="singleClickScroll(150)" onmousedown="startContinuousScroll(10)" onmouseup="stopContinuousScroll()" ontouchstart="startContinuousScroll(10)" ontouchend="stopContinuousScroll()">▼</button>
+</div>
 
     <div class="chat-history-bg"></div>
     <div class="chat-history" id="chat-box">
@@ -657,22 +657,46 @@ html, body {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
         let scrollInterval = null;
+let isHolding = false; // Yeh track karega ke user hold kar raha hai ya click
 
 function startContinuousScroll(direction) {
     const chatBox = document.getElementById('chat-box');
     if (!chatBox) return;
     
-    // Smooth scrolling continuous loop jab tak user button dabaye rakhega
-    scrollInterval = setInterval(() => {
-        chatBox.scrollTop += direction;
-    }, 15); // Har 15ms baad scroll pixel barhega/kam hoga
+    isHolding = false;
+    // 150ms ke baad system samjhega ke yeh "Hold" hai
+    scrollInterval = setTimeout(() => {
+        isHolding = true;
+        scrollInterval = setInterval(() => {
+            chatBox.scrollTop += direction;
+        }, 15); // Continuous smooth scrolling loop
+    }, 150);
 }
 
 function stopContinuousScroll() {
     if (scrollInterval) {
+        clearTimeout(scrollInterval);
         clearInterval(scrollInterval);
         scrollInterval = null;
     }
+}
+
+// 🎯 NEW: Single click par instant jump karne ka logic
+function singleClickScroll(amount) {
+    // Agar user hold kar raha tha, toh single click ka trigger execute nahi hone denge
+    if (isHolding) {
+        isHolding = false;
+        return;
+    }
+    
+    const chatBox = document.getElementById('chat-box');
+    if (!chatBox) return;
+    
+    // Chat box ko smoothly upar ya neeche fixed amount par push karega
+    chatBox.scrollBy({
+        top: amount,
+        behavior: 'smooth' // Clicking ko smooth and premium look dene ke liye
+    });
 }
     </script>
 </body>
