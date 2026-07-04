@@ -688,51 +688,6 @@ function stopContinuousScroll() {
         scrollInterval = null;
     }
 }
-// 🎯 WEBINTOAPP GLOBAL PULL-TO-REFRESH BLOCKER
-document.addEventListener('DOMContentLoaded', () => {
-    const chatBox = document.getElementById('chat-box');
-    const dropdownMenu = document.getElementById('custom-dropdown-menu');
-
-    // generic touch boundary calculation function
-    function preventAppRefresh(element) {
-        if (!element) return;
-
-        element.addEventListener('touchstart', function(e) {
-            // Agar box scroll ke bilkul top (0) par hai, toh halka sa 1px shift karo
-            // Is se WebView engine samjhega ke scroll chal raha hai, global refresh nahi
-            if (this.scrollTop === 0) {
-                this.scrollTop = 1;
-            }
-        }, { passive: false });
-
-        element.addEventListener('touchmove', function(e) {
-            // Jab user content ke andar finger move karega, toh ye event ko 
-            // WebIntoApp ke global body listener tak nahi pohnchne dega
-            if (this.scrollHeight > this.clientHeight) {
-                e.stopPropagation(); // Stop event from bubbling up to WebIntoApp layer
-            }
-        }, { passive: false });
-    }
-
-    // Dono targeted scrolling sections par yeh rule enforce karein
-    preventAppRefresh(chatBox);
-    preventAppRefresh(dropdownMenu);
-
-    // Global body safety layer: pure page ke blank area ko bhi lock karne ke liye
-    document.body.addEventListener('touchmove', function(e) {
-        // Agar user top header ke ilawa kahin aur swipe kare, toh refresh block ho
-        const touchY = e.touches[0].clientY;
-        if (touchY > 80) { // Top 80px ka margin chor kar (modern apps ki tarah)
-            // check if the touch target is inside scrollable elements
-            if (!chatBox.contains(e.target) && !dropdownMenu.contains(e.target)) {
-                // If it's a random empty space, don't allow default pull down action
-                if (document.documentElement.scrollTop <= 0) {
-                     // blocks random native pulling
-                }
-            }
-        }
-    }, { passive: true });
-});
     </script>
 </body>
 </html>
