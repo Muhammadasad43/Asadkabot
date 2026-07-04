@@ -145,14 +145,20 @@
             border-radius: 12px;
             box-shadow: 0 -4px 25px rgba(0, 0, 0, 0.6), 0 0 15px rgba(37, 99, 235, 0.3);
             width: 230px;
-            max-height: 250px;
-            overflow-y: auto;
+            max-height: 220px; /* ⚡ Infinix screen size ke liye height fix ki */
             z-index: 9999;
             opacity: 0;
             pointer-events: none;
             transform: translateY(10px);
             transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+            /* 🛠️ MOBILE APP TOUCH SCROLL PERMANENT FIX */
+            overflow-y: auto; 
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch; /* Android WebView par touch active karne ke liye */
+            overscroll-behavior: contain; /* Background page ko jam karne ke liye */
         }
+
         .dropdown-menu.show {
             opacity: 1;
             pointer-events: auto;
