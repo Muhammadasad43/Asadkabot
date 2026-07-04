@@ -5,8 +5,9 @@ from flask import Flask, render_template, request, Response
 
 app = Flask(__name__)
 
-POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "fallback_key_if_needed")
-
+# 🔑 POLLINATIONS SECRET KEY (With .strip() to remove accidental spaces or breaks)
+RAW_KEY = os.environ.get("POLLINATIONS_API_KEY", "")
+POLLINATIONS_API_KEY = RAW_KEY.strip()
 AVAILABLE_MODELS = {
     "qwen-coder": "Qwen 2.5 Coder 32B (Tech/Raw)",
     "deepseek": "DeepSeek V3.2 (Reasoning)",
