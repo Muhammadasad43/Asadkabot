@@ -1,10 +1,11 @@
+import os
 import json
 import requests
 from flask import Flask, render_template, request, Response
 
 app = Flask(__name__)
 
-POLLINATIONS_API_KEY = "sk_22ckch5yGdSgCWiFTgY3Vx5gWiypSsMM"
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "fallback_key_if_needed")
 
 AVAILABLE_MODELS = {
     "qwen-coder": "Qwen 2.5 Coder 32B (Tech/Raw)",
