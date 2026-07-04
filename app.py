@@ -14,8 +14,6 @@ AVAILABLE_MODELS = {
     "deepseek": "DeepSeek V3.2 (Reasoning)",
     "openai": "GPT-4o (Standard Base)",
     "gpt-5.4-mini": "GPT-5.4 Nano Engine",
-    "claude-fast": "Claude 3.5 Haiku",
-    "claude": "Claude 3.5 Opus",
     "kimi": "Kimi K2.5 (Default Text)",
     "kimi-code": "Kimi K2.6 (Strong Agentic)",
     "llama": "Llama 3.3 70B (Open-Weights)",
