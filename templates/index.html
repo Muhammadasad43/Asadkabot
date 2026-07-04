@@ -656,6 +656,24 @@ html, body {
         function escapeHtml(text) {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
+        let scrollInterval = null;
+
+function startContinuousScroll(direction) {
+    const chatBox = document.getElementById('chat-box');
+    if (!chatBox) return;
+    
+    // Smooth scrolling continuous loop jab tak user button dabaye rakhega
+    scrollInterval = setInterval(() => {
+        chatBox.scrollTop += direction;
+    }, 15); // Har 15ms baad scroll pixel barhega/kam hoga
+}
+
+function stopContinuousScroll() {
+    if (scrollInterval) {
+        clearInterval(scrollInterval);
+        scrollInterval = null;
+    }
+}
     </script>
 </body>
 </html>
