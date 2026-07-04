@@ -688,7 +688,33 @@ function stopContinuousScroll() {
         scrollInterval = null;
     }
 }
+// 🎯 DROPDOWN PULL-TO-REFRESH BLOCK FOR APP
+document.addEventListener('DOMContentLoaded', () => {
+    const dropdownMenu = document.getElementById('custom-dropdown-menu');
+    
+    if (dropdownMenu) {
+        // Jab user dropdown ke andar touch karega
+        dropdownMenu.addEventListener('touchstart', function(e) {
+            // Agar dropdown scroll ke bilkul top par hai (scrollTop === 0)
+            if (this.scrollTop === 0) {
+                // Halka sa 1 pixel scroll down kar denge taake Android browser ise pull-to-refresh na samjhe
+                this.scrollTop = 1;
+            }
+        }, { passive: false });
 
+        // Scroll event ko native app refreshing se block karne ke liye
+        dropdownMenu.addEventListener('touchmove', function(e) {
+            // Dropdown ke andar ka scroll content height aur height boundaries check karna
+            const isScrollingUp = e.touches[0].clientY > this.lastClientY;
+            
+            // Agar dropdown menu scroll ho sakta hai, toh event ko bahar page par propagation se rokein
+            if (this.scrollHeight > this.clientHeight) {
+                e.stopPropagation();
+            }
+            this.lastClientY = e.touches[0].clientY;
+        }, { passive: false });
+    }
+});
 // 🎯 FIXED: Shaking mechanism block karne ke liye instant navigation logic
 function singleClickScroll(amount) {
     if (isHolding) {
