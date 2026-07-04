@@ -657,20 +657,22 @@ html, body {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }
         let scrollInterval = null;
-let isHolding = false; // Yeh track karega ke user hold kar raha hai ya click
+let isHolding = false;
 
 function startContinuousScroll(direction) {
     const chatBox = document.getElementById('chat-box');
     if (!chatBox) return;
     
-    isHolding = false;
-    // 150ms ke baad system samjhega ke yeh "Hold" hai
+    // Kisi bhi chalte hue click event ko fresh karne ke liye
+    isHolding = false; 
+    
+    // Hold delay: 120ms tak hold karne par fast stream loop activate hoga
     scrollInterval = setTimeout(() => {
         isHolding = true;
         scrollInterval = setInterval(() => {
             chatBox.scrollTop += direction;
-        }, 15); // Continuous smooth scrolling loop
-    }, 150);
+        }, 10); // Hold par fast aur smooth manual navigation bina framework crash ke
+    }, 120);
 }
 
 function stopContinuousScroll() {
@@ -681,9 +683,8 @@ function stopContinuousScroll() {
     }
 }
 
-// 🎯 NEW: Single click par instant jump karne ka logic
+// 🎯 FIXED: Shaking mechanism block karne ke liye instant navigation logic
 function singleClickScroll(amount) {
-    // Agar user hold kar raha tha, toh single click ka trigger execute nahi hone denge
     if (isHolding) {
         isHolding = false;
         return;
@@ -692,11 +693,10 @@ function singleClickScroll(amount) {
     const chatBox = document.getElementById('chat-box');
     if (!chatBox) return;
     
-    // Chat box ko smoothly upar ya neeche fixed amount par push karega
-    chatBox.scrollBy({
-        top: amount,
-        behavior: 'smooth' // Clicking ko smooth and premium look dene ke liye
-    });
+    // 🛠️ CRITICAL FIX: 'behavior: smooth' hata kar instant math coordinates apply kiye hain
+    // Is se browser ka render engine glitch nahi karega aur shake permanent khatam ho jayega
+    chatBox.scrollTop += amount; 
+}
 }
     </script>
 </body>
