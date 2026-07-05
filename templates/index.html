@@ -267,12 +267,14 @@ html, body {
                 <span style="font-weight: 700; color: #475569; font-size: 0.75rem;">AI MODEL:</span>
 
                 <div class="custom-dropdown">
+                    <!-- 1. trigger text ko badal kar Llama 70B kar diya -->
                     <div class="dropdown-trigger" id="custom-dropdown-trigger" onclick="toggleDropdown(event)">
-                        Qwen 2.5 Coder 32B (Tech/Raw) ▾
+                        Llama 70B Meta AI(Lightning Fast) ▾
                     </div>
                     <div class="dropdown-menu" id="custom-dropdown-menu">
                         {% for key, name in models.items() %}
-                            <div class="dropdown-item {% if key == 'qwen-coder' %}selected{% endif %}"
+                            <!-- 2. Jinja condition ko 'qwen-coder' se badal kar 'llama-groq' kar diya taake select option active dikhe -->
+                            <div class="dropdown-item {% if key == 'llama-groq' %}selected{% endif %}"
                                  data-value="{{ key }}"
                                  onclick="selectModel('{{ key }}', '{{ name }}')">
                                 {{ name }}
