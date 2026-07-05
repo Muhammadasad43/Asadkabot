@@ -10,16 +10,16 @@ POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 AVAILABLE_MODELS = {
-    "qwen-coder": "Qwen 2.5 Coder 32B (Tech/Raw)",
+    "llama-groq": "Llama 70B Meta AI(Lightning Fast)",  # 
+    "gpt-5.4-mini": "GPT-5.4",
     "deepseek": "DeepSeek V3.2 (Reasoning)",
-    "openai": "GPT-4o (Standard Base)",
-    "gpt-5.4-mini": "GPT-5.4 Nano Engine",
-    "kimi": "Kimi K2.5 (Default Text)",
-    "kimi-code": "Kimi K2.6 (Strong Agentic)",
-    "llama": "Llama 3.3 70B (Open-Weights)",
-    "llama-groq": "Llama 70B 2nd (Groq Engine)",  # ⚡ Added 2nd engine option
-    "mistral": "Mistral Small 4",
-    "glm": "Z.ai GLM 5"
+    "openai": "GPT-4o (Standard)",
+    "llama": "Llama 3.3 70B (Meta AI)",
+    "mistral": "Mistral 4 Uncensored",
+    "glm": "Z.ai GLM 5",
+    "qwen-coder": "Qwen 2.5 Coding Agent(Tech Use)",
+    "kimi": "Kimi K2.5 (Default)",
+    "kimi-code": "Kimi K2.6 (Strong Agentic)"
 }
 
 @app.route('/')
