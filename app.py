@@ -30,7 +30,7 @@ def index():
 def chat_stream():
     data = request.json or {}
     history_messages = data.get('messages', [])
-    selected_model = data.get('model', 'qwen-coder')
+    selected_model = data.get('model', 'llama-groq')
 
     if not history_messages:
         return {"error": "No messages array provided"}, 400
