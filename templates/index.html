@@ -75,7 +75,6 @@
     display: flex; 
     width: 100%; 
     flex-direction: column; 
-    margin-bottom: 24px; 
 }
 .msg-row.user-set {
     align-items: flex-end;
@@ -83,7 +82,8 @@
 }
 .msg-row.ai-set {
     align-items: flex-start;
-    margin-bottom: 24px;
+    margin-bottom: 36px;
+}
 }
 .message { 
     max-width: 85%; 
@@ -97,6 +97,33 @@
     overflow-wrap: break-word;
     margin-top: 0px;
     margin-bottom: 0px;
+}
+.message pre { 
+    background: #0b0d14; 
+    padding: 12px; 
+    border-radius: 10px; 
+    overflow-x: auto; 
+    border: 1px solid #1e2335; 
+    margin: 10px 0; 
+    position: relative;
+}
+.code-copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(37, 99, 235, 0.15);
+    border: 1px solid var(--blue-btn);
+    color: #38bdf8;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 100;
+}
+.code-copy-btn:hover {
+    background: var(--blue-btn);
+    color: #fff;
 }
 .edited-lbl { font-size: 0.72rem; color: #38bdf8; font-weight: bold; margin-bottom: 3px; margin-right: 5px; align-self: flex-end; opacity: 0.85; }
 .message h1, .message h2, .message h3 { color: var(--accent); margin-top: 5px; margin-bottom: 10px; font-weight: 800; }
@@ -444,7 +471,6 @@ html, body {
     const chatBox = document.getElementById('chat-box');
     const wrapperDiv = document.createElement('div');
     
-    // ⚡ Yahan user-set aur ai-set ki conditional matching classes enforce ki hain margin handles ke liye
     wrapperDiv.className = `msg-row ${sender === 'User' ? 'user-set' : 'ai-set'}`;
 
     let actionHtml = '';
@@ -460,9 +486,13 @@ html, body {
     let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
 
     wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
+    
+    if (sender !== 'User') {
+        attachCodeCopyButtons(wrapperDiv);
+    }
+    
     chatBox.appendChild(wrapperDiv);
 }
-
         function editUserPrompt(index) {
             const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
             if(!currentChatId || !sessions[currentChatId]) return;
@@ -562,8 +592,7 @@ html, body {
     inputEl.value = '';
     resetInputBox(); // Message send hote hi textarea ko 1 line par reset karega
 
-    // 🎯 AI CHAT BUBBLE STREAMING AREA (With dynamic 'ai-set' class for precise layout gaps)
-    const chatBox = document.getElementById('chat-box');
+        const chatBox = document.getElementById('chat-box');
     const wrapperDiv = document.createElement('div');
     wrapperDiv.className = 'msg-row ai-set'; 
     wrapperDiv.innerHTML = `<div class="message ai"><div id="log-zone"></div><span id="text-node">Generating response...</span></div>`;
@@ -614,10 +643,11 @@ html, body {
                         try {
                             const jsonStr = cleanLine.replace('data: ', '');
                             const parsed = JSON.parse(jsonStr);
-                            if (parsed.token) {
+                         if (parsed.token) {
                                 if (firstToken) { textNode.innerText = ""; firstToken = false; }
                                 completeAiResponse += parsed.token;
                                 textNode.innerHTML = marked.parse(completeAiResponse);
+                                attachCodeCopyButtons(wrapperDiv);
                             } else if (parsed.error) {
                                 textNode.innerText = `\n🚨 Tunnel Fail: ${parsed.error}`;
                             }
@@ -647,6 +677,30 @@ function resetInputBox() {
         textarea.style.height = '24px'; /* ➔ Wapis original single-line height par clear karega */
     }
 }   
+        function attachCodeCopyButtons(container) {
+    const preBlocks = container.querySelectorAll('pre');
+    preBlocks.forEach((pre) => {
+        if (pre.querySelector('.code-copy-btn')) return;
+        const codeEl = pre.querySelector('code');
+        if (!codeEl) return;
+        
+        const btn = document.createElement('button');
+        btn.className = 'code-copy-btn';
+        btn.innerText = '📋';
+        
+        btn.onclick = function(e) {
+            e.stopPropagation();
+            const textToCopy = codeEl.innerText;
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const toast = document.getElementById('toast-notification');
+                toast.innerText = `Code Copied ⚡`;
+                toast.classList.add('show');
+                setTimeout(() => { toast.classList.remove('show'); }, 2000);
+            });
+        };
+        pre.appendChild(btn);
+    });
+        }
     </script>
 </body>
 </html>
