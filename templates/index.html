@@ -652,15 +652,13 @@ function autoResizeInput(textarea) {
     textarea.style.height = textarea.scrollHeight + 'px';
 }
 
-// 🎯 Message send hone par box ko wapis standard 1 line par reset karne ke liye
 function resetInputBox() {
     const textarea = document.getElementById('user-input');
     if (textarea) {
         textarea.value = '';
-        textarea.style.height = 'auto';
+        textarea.style.height = '24px'; /* ➔ Wapis original single-line height par clear karega */
     }
-}
-        
+}   
     </script>
 </body>
 </html>
