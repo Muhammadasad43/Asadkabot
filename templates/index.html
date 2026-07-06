@@ -84,7 +84,25 @@
     gap: 16px; 
         }
 
-        .msg-row { display: flex; width: 100%; flex-direction: column; margin-bottom: 5px; }
+                 /* 🎯 GLOBAL ROW GAP: Naye sets ke beech 3 lines (~35px) ka gap */
+        .msg-row { 
+            display: flex; 
+            width: 100%; 
+            flex-direction: column; 
+            margin-bottom: 35px; 
+        }
+
+        /* 🎯 USER ROW: Apne message ke baad AI response ke liye sirf 1 line (~10px) ka gap */
+        .msg-row.user-set {
+            align-items: flex-end;
+            margin-bottom: 10px; 
+        }
+
+        /* 🎯 AI ROW: Left alignment fallback */
+        .msg-row.ai-set {
+            align-items: flex-start;
+        }
+
         .message { max-width: 85%; padding: 12px 16px; border-radius: 16px; line-height: 1.6; font-size: 0.98rem; position: relative; }
 
         .edited-lbl { font-size: 0.72rem; color: #38bdf8; font-weight: bold; margin-bottom: 3px; margin-right: 5px; align-self: flex-end; opacity: 0.85; }
@@ -98,8 +116,10 @@
         .message pre { background: #0b0d14; padding: 12px; border-radius: 10px; overflow-x: auto; border: 1px solid #1e2335; margin: 10px 0; }
         .message pre code { background: transparent; padding: 0; color: #38bdf8; }
 
-        .message.user { background: #2563eb; align-self: flex-end; border-bottom-right-radius: 2px; box-shadow: 0 4px 15px rgba(37,99,235,0.2); }
-        .message.ai { background: var(--panel); align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid #1e2335; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        /* Sleek mainstream bubbles shape logic */
+        .message.user { background: #2563eb; border-bottom-right-radius: 4px; box-shadow: 0 4px 15px rgba(37,99,235,0.2); }
+        .message.ai { background: var(--panel); border-bottom-left-radius: 4px; border: 1px solid #1e2335; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        
 
         .msg-actions { display: flex; gap: 8px; margin-top: 5px; font-size: 0.75rem; color: #64748b; opacity: 0; transform: translateY(5px); transition: all 0.2s ease; }
         .msg-row:hover .msg-actions { opacity: 1; transform: translateY(0); }
@@ -437,26 +457,27 @@ html, body {
         }
 
         function appendBubbleToUI(sender, text, index, isEdited) {
-            const chatBox = document.getElementById('chat-box');
-            const wrapperDiv = document.createElement('div');
-            wrapperDiv.className = 'msg-row';
-            wrapperDiv.style.alignItems = sender === 'User' ? 'flex-end' : 'flex-start';
+    const chatBox = document.getElementById('chat-box');
+    const wrapperDiv = document.createElement('div');
+    
+    // ⚡ Yahan user-set aur ai-set ki conditional matching classes enforce ki hain margin handles ke liye
+    wrapperDiv.className = `msg-row ${sender === 'User' ? 'user-set' : 'ai-set'}`;
 
-            let actionHtml = '';
-            const base64Str = btoa(unescape(encodeURIComponent(text)));
+    let actionHtml = '';
+    const base64Str = btoa(unescape(encodeURIComponent(text)));
 
-            if (sender === 'User') {
-                actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="editUserPrompt(${index})">✏️ Edit</div><div class="action-btn" onclick="copyText('${base64Str}', 'Input')">📂 Copy input</div></div>`;
-            } else {
-                actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="copyText('${base64Str}', 'Response')">📂 Copy response</div></div>`;
-            }
+    if (sender === 'User') {
+        actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="editUserPrompt(${index})">✏️ Edit</div><div class="action-btn" onclick="copyText('${base64Str}', 'Input')">📂 Copy input</div></div>`;
+    } else {
+        actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="copyText('${base64Str}', 'Response')">📂 Copy response</div></div>`;
+    }
 
-            let htmlContent = sender === 'User' ? escapeHtml(text) : marked.parse(text);
-            let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
+    let htmlContent = sender === 'User' ? escapeHtml(text) : marked.parse(text);
+    let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
 
-            wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
-            chatBox.appendChild(wrapperDiv);
-        }
+    wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
+    chatBox.appendChild(wrapperDiv);
+}
 
         function editUserPrompt(index) {
             const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
@@ -522,108 +543,110 @@ html, body {
         }
 
         function sendMessage() {
-            const inputEl = document.getElementById('user-input');
-            let text = inputEl.value.trim();
-            let selectedModel = selectedModelGlobal;
+    const inputEl = document.getElementById('user-input');
+    let text = inputEl.value.trim();
+    let selectedModel = selectedModelGlobal;
 
-            if (!text) return;
-            if(!currentChatId) createNewChat();
+    if (!text) return;
+    if(!currentChatId) createNewChat();
 
-            const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
-            if(!sessions[currentChatId]) return;
+    const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
+    if(!sessions[currentChatId]) return;
 
-            if (editingLogIndex !== null) {
-                sessions[currentChatId].logs[editingLogIndex].text = text;
-                sessions[currentChatId].logs[editingLogIndex].isEdited = true;
-                sessions[currentChatId].logs.splice(editingLogIndex + 1);
-                if(editingLogIndex === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
-                localStorage.setItem('asad_sessions', JSON.stringify(sessions));
-            } else {
-                if(sessions[currentChatId].logs.length === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
-                sessions[currentChatId].logs.push({sender: 'User', text: text, isEdited: false});
-                localStorage.setItem('asad_sessions', JSON.stringify(sessions));
-            }
+    if (editingLogIndex !== null) {
+        sessions[currentChatId].logs[editingLogIndex].text = text;
+        sessions[currentChatId].logs[editingLogIndex].isEdited = true;
+        sessions[currentChatId].logs.splice(editingLogIndex + 1);
+        if(editingLogIndex === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
+        localStorage.setItem('asad_sessions', JSON.stringify(sessions));
+    } else {
+        if(sessions[currentChatId].logs.length === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
+        sessions[currentChatId].logs.push({sender: 'User', text: text, isEdited: false});
+        localStorage.setItem('asad_sessions', JSON.stringify(sessions));
+    }
 
-            // ⚡ Compile the dynamic history payload according to current memory state variable array
-            const structuralHistoryPayload = buildHistoryPayload(sessions, text, selectedModel);
+    // ⚡ Compile the dynamic history payload according to current memory state variable array
+    const structuralHistoryPayload = buildHistoryPayload(sessions, text, selectedModel);
 
-            if (editingLogIndex !== null) {
-                cancelEditMode();
-            }
+    if (editingLogIndex !== null) {
+        cancelEditMode();
+    }
 
-            renderActiveLogs();
-            inputEl.value = '';
+    renderActiveLogs();
+    
+    // 🎯 INPUT BOX RESET MECHANICS
+    inputEl.value = '';
+    resetInputBox(); // Message send hote hi textarea ko 1 line par reset karega
 
-            const chatBox = document.getElementById('chat-box');
-            const wrapperDiv = document.createElement('div');
-            wrapperDiv.className = 'msg-row';
-            wrapperDiv.style.alignItems = 'flex-start';
-            wrapperDiv.innerHTML = `<div class="message ai"><div id="log-zone"></div><span id="text-node">Generating response...</span></div>`;
-            chatBox.appendChild(wrapperDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
+    // 🎯 AI CHAT BUBBLE STREAMING AREA (With dynamic 'ai-set' class for precise layout gaps)
+    const chatBox = document.getElementById('chat-box');
+    const wrapperDiv = document.createElement('div');
+    wrapperDiv.className = 'msg-row ai-set'; 
+    wrapperDiv.innerHTML = `<div class="message ai"><div id="log-zone"></div><span id="text-node">Generating response...</span></div>`;
+    chatBox.appendChild(wrapperDiv);
+    chatBox.scrollTop = chatBox.scrollHeight;
 
-            const logZone = wrapperDiv.querySelector('#log-zone');
-            const textNode = wrapperDiv.querySelector('#text-node');
+    const logZone = wrapperDiv.querySelector('#log-zone');
+    const textNode = wrapperDiv.querySelector('#text-node');
 
-            // 🌐 Direct call to local `/chat_stream` on the same Render host domain wrapper
-            fetch('/chat_stream', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    messages: structuralHistoryPayload, 
-                    model: selectedModel 
-                })
-            }).then(response => {
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let completeAiResponse = "";
-                let firstToken = true;
+    // 🌐 Direct call to local `/chat_stream` on the same Render host domain wrapper
+    fetch('/chat_stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            messages: structuralHistoryPayload, 
+            model: selectedModel 
+        })
+    }).then(response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let completeAiResponse = "";
+        let firstToken = true;
 
-                function readChunk() {
-                    reader.read().then(({ done, value }) => {
-                        if (done) {
-                            if(completeAiResponse) {
-                                const freshSessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
-                                if(freshSessions[currentChatId]) {
-                                    freshSessions[currentChatId].logs.push({sender: 'Asad AI', text: completeAiResponse});
-                                    freshSessions[currentChatId].timestamp = Date.now();
-                                    localStorage.setItem('asad_sessions', JSON.stringify(freshSessions));
-                                    loadSessions();
-                                }
-                            }
-                            return;
+        function readChunk() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    if(completeAiResponse) {
+                        const freshSessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
+                        if(freshSessions[currentChatId]) {
+                            freshSessions[currentChatId].logs.push({sender: 'Asad AI', text: completeAiResponse});
+                            freshSessions[currentChatId].timestamp = Date.now();
+                            localStorage.setItem('asad_sessions', JSON.stringify(freshSessions));
+                            loadSessions();
                         }
-
-                        const chunkStr = decoder.decode(value);
-                        const lines = chunkStr.split('\n');
-
-                        lines.forEach(line => {
-                            let cleanLine = line.trim();
-                            if (cleanLine.startsWith('data: [STATUS:')) {
-                                logZone.innerHTML = `<div class="search-log">${escapeHtml(cleanLine.replace('data: ', ''))}</div>`;
-                            } else if (cleanLine.startsWith('data: ')) {
-                                if (cleanLine === "data: [DONE]") return;
-                                try {
-                                    const jsonStr = cleanLine.replace('data: ', '');
-                                    const parsed = JSON.parse(jsonStr);
-                                    if (parsed.token) {
-                                        if (firstToken) { textNode.innerText = ""; firstToken = false; }
-                                        completeAiResponse += parsed.token;
-                                        textNode.innerHTML = marked.parse(completeAiResponse);
-                                    } else if (parsed.error) {
-                                        textNode.innerText = `\n🚨 Tunnel Fail: ${parsed.error}`;
-                                    }
-                                } catch(e) {}
-                                chatBox.scrollTop = chatBox.scrollHeight;
-                            }
-                        });
-                        readChunk();
-                    });
+                    }
+                    return;
                 }
-                readChunk();
-            }).catch(() => { textNode.innerText = `\n🚨 Pipeline connection drops down.`; });
-        }
 
+                const chunkStr = decoder.decode(value);
+                const lines = chunkStr.split('\n');
+
+                lines.forEach(line => {
+                    let cleanLine = line.trim();
+                    if (cleanLine.startsWith('data: [STATUS:')) {
+                        logZone.innerHTML = `<div class="search-log">${escapeHtml(cleanLine.replace('data: ', ''))}</div>`;
+                    } else if (cleanLine.startsWith('data: ')) {
+                        if (cleanLine === "data: [DONE]") return;
+                        try {
+                            const jsonStr = cleanLine.replace('data: ', '');
+                            const parsed = JSON.parse(jsonStr);
+                            if (parsed.token) {
+                                if (firstToken) { textNode.innerText = ""; firstToken = false; }
+                                completeAiResponse += parsed.token;
+                                textNode.innerHTML = marked.parse(completeAiResponse);
+                            } else if (parsed.error) {
+                                textNode.innerText = `\n🚨 Tunnel Fail: ${parsed.error}`;
+                            }
+                        } catch(e) {}
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+                });
+                readChunk();
+            });
+        }
+        readChunk();
+    }).catch(() => { textNode.innerText = `\n🚨 Pipeline connection drops down.`; });
+                    }
         function escapeHtml(text) {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }    
