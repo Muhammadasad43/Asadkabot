@@ -114,7 +114,24 @@
         .action-btn { cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #14192b; border: 1px solid #1e253b; color: #94a3b8; }
         .action-btn:hover { color: var(--blue-btn); background: #1e253f; border-color: var(--blue-btn); }
         .search-log { color: var(--accent); font-family: monospace; font-size: 0.78rem; margin-bottom: 6px; font-weight: bold; }
-
+.code-copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(37, 99, 235, 0.15);
+    border: 1px solid var(--blue-btn);
+    color: #38bdf8;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: bold;
+    cursor: pointer;
+    z-index: 100;
+}
+.code-copy-btn:hover {
+    background: var(--blue-btn);
+    color: #fff;
+}
         .dock-input-panel { padding: 12px 20px; background: var(--bg); border-top: 1px solid #1e2335; z-index: 10; position: relative; }
         .dock-input-wrapper { background: var(--panel); border: 1px solid #23293f; border-radius: 24px; display: flex; padding: 8px 16px; align-items: center; gap: 10px; }
         textarea { 
@@ -647,6 +664,30 @@ function resetInputBox() {
         textarea.style.height = '24px'; /* ➔ Wapis original single-line height par clear karega */
     }
 }   
+        function attachCodeCopyButtons(container) {
+    const preBlocks = container.querySelectorAll('pre');
+    preBlocks.forEach((pre) => {
+        if (pre.querySelector('.code-copy-btn')) return;
+        const codeEl = pre.querySelector('code');
+        if (!codeEl) return;
+        
+        const btn = document.createElement('button');
+        btn.className = 'code-copy-btn';
+        btn.innerText = '📋';
+        
+        btn.onclick = function(e) {
+            e.stopPropagation();
+            const textToCopy = codeEl.innerText;
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const toast = document.getElementById('toast-notification');
+                toast.innerText = `Code Copied`;
+                toast.classList.add('show');
+                setTimeout(() => { toast.classList.remove('show'); }, 2000);
+            });
+        };
+        pre.appendChild(btn);
+    });
+        }
     </script>
 </body>
 </html>
