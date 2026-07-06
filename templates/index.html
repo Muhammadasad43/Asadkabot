@@ -114,7 +114,17 @@
         .action-btn { cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #14192b; border: 1px solid #1e253b; color: #94a3b8; }
         .action-btn:hover { color: var(--blue-btn); background: #1e253f; border-color: var(--blue-btn); }
         .search-log { color: var(--accent); font-family: monospace; font-size: 0.78rem; margin-bottom: 6px; font-weight: bold; }
-.code-copy-btn {
+        .message pre { 
+            background: #0b0d14; 
+            padding: 12px; 
+            border-radius: 10px; 
+            overflow-x: auto; 
+            border: 1px solid #1e2335; 
+            margin: 10px 0; 
+            position: relative; /* ➔ Copy button ko top-right align karne ke liye position zaroori hai */
+        }
+        .message pre code { background: transparent; padding: 0; color: #38bdf8; }
+        .code-copy-btn {
     position: absolute;
     top: 8px;
     right: 8px;
@@ -457,28 +467,33 @@ html, body {
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        function appendBubbleToUI(sender, text, index, isEdited) {
-    const chatBox = document.getElementById('chat-box');
-    const wrapperDiv = document.createElement('div');
-    
-    // ⚡ Yahan user-set aur ai-set ki conditional matching classes enforce ki hain margin handles ke liye
-    wrapperDiv.className = `msg-row ${sender === 'User' ? 'user-set' : 'ai-set'}`;
+            function appendBubbleToUI(sender, text, index, isEdited) {
+            const chatBox = document.getElementById('chat-box');
+            const wrapperDiv = document.createElement('div');
+            
+            wrapperDiv.className = `msg-row ${sender === 'User' ? 'user-set' : 'ai-set'}`;
 
-    let actionHtml = '';
-    const base64Str = btoa(unescape(encodeURIComponent(text)));
+            let actionHtml = '';
+            const base64Str = btoa(unescape(encodeURIComponent(text)));
 
-    if (sender === 'User') {
-        actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="editUserPrompt(${index})">✏️ Edit</div><div class="action-btn" onclick="copyText('${base64Str}', 'Input')">📂 Copy input</div></div>`;
-    } else {
-        actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="copyText('${base64Str}', 'Response')">📂 Copy response</div></div>`;
-    }
+            if (sender === 'User') {
+                actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="editUserPrompt(${index})">✏️ Edit</div><div class="action-btn" onclick="copyText('${base64Str}', 'Input')">📂 Copy input</div></div>`;
+            } else {
+                actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="copyText('${base64Str}', 'Response')">📂 Copy response</div></div>`;
+            }
 
-    let htmlContent = sender === 'User' ? escapeHtml(text) : marked.parse(text);
-    let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
+            let htmlContent = sender === 'User' ? escapeHtml(text) : marked.parse(text);
+            let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
 
-    wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
-    chatBox.appendChild(wrapperDiv);
-}
+            wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
+            
+            // ⚡ Agar AI ka response hai toh code block dhoondh kar button lagao
+            if (sender !== 'User') {
+                attachCodeCopyButtons(wrapperDiv);
+            }
+            
+            chatBox.appendChild(wrapperDiv);
+        }
 
         function editUserPrompt(index) {
             const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
@@ -631,10 +646,13 @@ html, body {
                         try {
                             const jsonStr = cleanLine.replace('data: ', '');
                             const parsed = JSON.parse(jsonStr);
-                            if (parsed.token) {
+                         if (parsed.token) {
                                 if (firstToken) { textNode.innerText = ""; firstToken = false; }
                                 completeAiResponse += parsed.token;
                                 textNode.innerHTML = marked.parse(completeAiResponse);
+                                
+                                // ⚡ Live stream hote waqt code editor ke top right par button lagao
+                                attachCodeCopyButtons(wrapperDiv);
                             } else if (parsed.error) {
                                 textNode.innerText = `\n🚨 Tunnel Fail: ${parsed.error}`;
                             }
