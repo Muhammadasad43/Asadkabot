@@ -129,8 +129,7 @@
 
         .dock-input-panel { padding: 12px 20px; background: var(--bg); border-top: 1px solid #1e2335; z-index: 10; position: relative; }
         .dock-input-wrapper { background: var(--panel); border: 1px solid #23293f; border-radius: 24px; display: flex; padding: 8px 16px; align-items: center; gap: 10px; }
-        /* 🎯 TEXTAREA CSS
-textarea { 
+        textarea { 
     flex-grow: 1; 
     background: transparent; 
     border: none; 
@@ -138,13 +137,12 @@ textarea {
     color: #fff; 
     resize: none; 
     font-size: 0.98rem; 
-    height: auto; /* Fixed height hata di */
-    max-height: 140px; /* Max 6 lines tak bada hoga */
-    overflow-y: auto; /* 6 lines se zyada par scrollbar scroll hoga */
+    height: 24px; /* ➔ Original default single line height */
+    max-height: 140px; /* ➔ Max 6 lines tak auto-expand limit */
+    overflow-y: auto; /* ➔ 6 lines se zyada hone par andar hi scroll hoga */
     line-height: 1.4;
-    padding: 4px 0;
+    padding: 2px 0;
 }
-        
         .action-send-btn { background: var(--accent); color: #000; border: none; width: 36px; height: 36px; border-radius: 50%; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .action-send-btn:hover { transform: scale(1.05); }
 
@@ -291,12 +289,10 @@ html, body {
                     <button class="edit-close-btn" onclick="cancelEditMode()">✖</button>
                 </div>
             </div>
-
-            <div class="dock-input-wrapper">
-                <textarea id="user-input" rows="1" placeholder="Write message..." oninput="autoResizeInput(this)"></textarea>
-                <button class="action-send-btn" onclick="sendMessage()">➔</button>
-            </div>
-
+       <div class="dock-input-wrapper">
+    <textarea id="user-input" rows="1" placeholder="Write message..." oninput="autoResizeInput(this)"></textarea>
+    <button class="action-send-btn" onclick="sendMessage()">➔</button>
+</div>
             <div class="config-toggles">
                 <span style="font-weight: 700; color: #475569; font-size: 0.75rem;">AI MODEL:</span>
 
