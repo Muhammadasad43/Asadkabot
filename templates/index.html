@@ -109,8 +109,22 @@
 
         .dock-input-panel { padding: 12px 20px; background: var(--bg); border-top: 1px solid #1e2335; z-index: 10; position: relative; }
         .dock-input-wrapper { background: var(--panel); border: 1px solid #23293f; border-radius: 24px; display: flex; padding: 8px 16px; align-items: center; gap: 10px; }
-        textarea { flex-grow: 1; background: transparent; border: none; outline: none; color: #fff; resize: none; font-size: 0.98rem; height: 26px; }
-
+        /* 🎯 TEXTAREA CSS
+textarea { 
+    flex-grow: 1; 
+    background: transparent; 
+    border: none; 
+    outline: none; 
+    color: #fff; 
+    resize: none; 
+    font-size: 0.98rem; 
+    height: auto; /* Fixed height hata di */
+    max-height: 140px; /* Max 6 lines tak bada hoga */
+    overflow-y: auto; /* 6 lines se zyada par scrollbar scroll hoga */
+    line-height: 1.4;
+    padding: 4px 0;
+}
+        
         .action-send-btn { background: var(--accent); color: #000; border: none; width: 36px; height: 36px; border-radius: 50%; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .action-send-btn:hover { transform: scale(1.05); }
 
@@ -259,7 +273,7 @@ html, body {
             </div>
 
             <div class="dock-input-wrapper">
-                <textarea id="user-input" placeholder="Write message..."></textarea>
+                <textarea id="user-input" rows="1" placeholder="Write message..." oninput="autoResizeInput(this)"></textarea>
                 <button class="action-send-btn" onclick="sendMessage()">➔</button>
             </div>
 
@@ -613,6 +627,21 @@ html, body {
         function escapeHtml(text) {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         }    
+        // 🎯 Input box ko text ke mutabiq bada karne ke liye
+function autoResizeInput(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+}
+
+// 🎯 Message send hone par box ko wapis standard 1 line par reset karne ke liye
+function resetInputBox() {
+    const textarea = document.getElementById('user-input');
+    if (textarea) {
+        textarea.value = '';
+        textarea.style.height = 'auto';
+    }
+}
+        
     </script>
 </body>
 </html>
