@@ -114,33 +114,54 @@
         .action-btn { cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #14192b; border: 1px solid #1e253b; color: #94a3b8; }
         .action-btn:hover { color: var(--blue-btn); background: #1e253f; border-color: var(--blue-btn); }
         .search-log { color: var(--accent); font-family: monospace; font-size: 0.78rem; margin-bottom: 6px; font-weight: bold; }
-        .message pre { 
+           .message pre { 
             background: #0b0d14; 
-            padding: 12px; 
+            padding: 0; 
             border-radius: 10px; 
-            overflow-x: auto; 
+            overflow: hidden; 
             border: 1px solid #1e2335; 
             margin: 10px 0; 
-            position: relative; /* ➔ Copy button ko top-right align karne ke liye position zaroori hai */
+            display: flex;
+            flex-direction: column;
         }
-        .message pre code { background: transparent; padding: 0; color: #38bdf8; }
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #141824;
+            padding: 8px 14px;
+            border-bottom: 1px solid #1e2335;
+            user-select: none;
+        }
+        .code-lang {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            font-family: monospace;
+            text-transform: lowercase;
+            font-weight: 600;
+        }
         .code-copy-btn {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: rgba(37, 99, 235, 0.15);
-            border: 1px solid var(--blue-btn);
+            background: transparent;
+            border: none;
             color: #38bdf8;
-            padding: 4px 8px;
-            border-radius: 6px;
-            font-size: 0.72rem;
+            font-size: 0.75rem;
             font-weight: bold;
             cursor: pointer;
-            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
         .code-copy-btn:hover {
-            background: var(--blue-btn);
-            color: #fff;
+            background: rgba(37, 99, 235, 0.15);
+        }
+        .message pre code { 
+            background: transparent; 
+            padding: 12px; 
+            color: #38bdf8; 
+            overflow-x: auto;
+            display: block;
         }
         .dock-input-panel { padding: 12px 20px; background: var(--bg); border-top: 1px solid #1e2335; z-index: 10; position: relative; }
         .dock-input-wrapper { background: var(--panel); border: 1px solid #23293f; border-radius: 24px; display: flex; padding: 8px 16px; align-items: center; gap: 10px; }
@@ -650,8 +671,6 @@ html, body {
                                 if (firstToken) { textNode.innerText = ""; firstToken = false; }
                                 completeAiResponse += parsed.token;
                                 textNode.innerHTML = marked.parse(completeAiResponse);
-                                
-                                // ⚡ Live stream hote waqt code editor ke top right par button lagao
                                 attachCodeCopyButtons(wrapperDiv);
                             } else if (parsed.error) {
                                 textNode.innerText = `\n🚨 Tunnel Fail: ${parsed.error}`;
@@ -682,30 +701,46 @@ function resetInputBox() {
         textarea.style.height = '24px'; /* ➔ Wapis original single-line height par clear karega */
     }
 }   
-        function attachCodeCopyButtons(container) {
-    const preBlocks = container.querySelectorAll('pre');
-    preBlocks.forEach((pre) => {
-        if (pre.querySelector('.code-copy-btn')) return;
-        const codeEl = pre.querySelector('code');
-        if (!codeEl) return;
-        
-        const btn = document.createElement('button');
-        btn.className = 'code-copy-btn';
-        btn.innerText = '📋';
-        
-        btn.onclick = function(e) {
-            e.stopPropagation();
-            const textToCopy = codeEl.innerText;
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                const toast = document.getElementById('toast-notification');
-                toast.innerText = `Code Copied`;
-                toast.classList.add('show');
-                setTimeout(() => { toast.classList.remove('show'); }, 2000);
+                function attachCodeCopyButtons(container) {
+            const preBlocks = container.querySelectorAll('pre');
+            preBlocks.forEach((pre) => {
+                if (pre.querySelector('.code-header')) return;
+                const codeEl = pre.querySelector('code');
+                if (!codeEl) return;
+                
+                let lang = 'code';
+                if (codeEl.className && codeEl.className.startsWith('language-')) {
+                    lang = codeEl.className.replace('language-', '');
+                }
+
+                const header = document.createElement('div');
+                header.className = 'code-header';
+
+                const langSpan = document.createElement('span');
+                langSpan.className = 'code-lang';
+                langSpan.innerText = lang;
+
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.innerHTML = '📋';
+                
+                btn.onclick = function(e) {
+                    e.stopPropagation();
+                    const textToCopy = codeEl.innerText;
+                    navigator.clipboard.writeText(textToCopy).then(() => {
+                        const toast = document.getElementById('toast-notification');
+                        toast.innerText = `Code Copied`;
+                        toast.classList.add('show');
+                        setTimeout(() => { toast.classList.remove('show'); }, 2000);
+                    });
+                };
+
+                header.appendChild(langSpan);
+                header.appendChild(btn);
+                pre.insertBefore(header, codeEl);
             });
-        };
-        pre.appendChild(btn);
-    });
         }
+
     </script>
 </body>
 </html>
