@@ -1,5 +1,7 @@
 import os
 import json
+import base64
+import urllib.parse
 import requests
 from flask import Flask, render_template, request, Response
 
@@ -46,47 +48,43 @@ def chat_stream():
 
     last_user_message = history_messages[-1]['content'] if history_messages else ""
 
-    # 🎨 ROUTE A: IMAGE GENERATOR
+    # 🎨 ROUTE A: NEW TESTED DIRECT GET IMAGE GENERATOR
     if selected_model == "image-gen":
         def generate_image():
-            yield "data: [STATUS: Generating artwork via Pollinations AI...] 🎨\n\n"
+            yield "data: [STATUS: Generating artwork via Pollinations GET Endpoint...] 🎨\n\n"
             try:
-                url = "https://gen.pollinations.ai/v1/images/generations"
-                headers = {
-                    "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
-                    "Content-Type": "application/json"
-                }
-                payload = {
-                    "prompt": last_user_message,
-                    "model": "flux",
-                    "n": 1,
-                    "size": "1024x1024",
-                    "quality": "medium",
-                    "response_format": "url"
-                }
+                # Prompt ko URL Safe Encode karna
+                encoded_prompt = urllib.parse.quote(last_user_message)
+                
+                # Tested GET Endpoint URL
+                url = f"https://gen.pollinations.ai/image/{encoded_prompt}?model=flux&width=1024&height=1024"
+                
+                headers = {}
+                if POLLINATIONS_API_KEY:
+                    headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
 
-                response = requests.post(url, json=payload, headers=headers, timeout=30)
+                # Image Fetch karna
+                response = requests.get(url, headers=headers, timeout=45)
                 
                 if response.status_code == 200:
-                    res_json = response.json()
-                    img_url = res_json['data'][0]['url'] if res_json.get('data') else None
+                    # Raw Image Data ko Base64 String mein convert karna
+                    base64_img = base64.b64encode(response.content).decode('utf-8')
+                    mime_type = response.headers.get('Content-Type', 'image/jpeg')
+                    data_url = f"data:{mime_type};base64,{base64_img}"
                     
-                    if img_url:
-                        # 📥 direct download ke liye onclick event lagaya gaya hai
-                        img_html = f'''
+                    # Clean HTML layout
+                    img_html = f'''
 <div class="generated-img-container" style="margin-top:10px;">
-    <img src="{img_url}" alt="Generated Image" style="max-width:100%; border-radius:12px; border:1px solid #1e2335; box-shadow:0 8px 20px rgba(0,0,0,0.4);" />
+    <img src="{data_url}" alt="Generated Image" style="max-width:100%; border-radius:12px; border:1px solid #1e2335; box-shadow:0 8px 20px rgba(0,0,0,0.4);" />
     <br>
-    <button onclick="downloadImageViaJS('{img_url}', 'asad-ai-generated.png')" style="display:inline-block; margin-top:10px; background:#10b981; color:#fff; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; font-size:0.85rem; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
+    <button onclick="downloadImageViaJS('{data_url}', 'asad-ai-generated.png')" style="display:inline-block; margin-top:10px; background:#10b981; color:#fff; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; font-size:0.85rem; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
         📥 Download Image
     </button>
 </div>
 '''
-                        yield f"data: {json.dumps({'token': img_html})}\n\n"
-                    else:
-                        yield f"data: {json.dumps({'error': 'Image URL not found in API response.'})}\n\n"
+                    yield f"data: {json.dumps({'token': img_html})}\n\n"
                 else:
-                    yield f"data: {json.dumps({'error': f'API Error {response.status_code}'})}\n\n"
+                    yield f"data: {json.dumps({'error': f'API Error {response.status_code}: {response.text}'})}\n\n"
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -166,3 +164,4 @@ def chat_stream():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+                    
