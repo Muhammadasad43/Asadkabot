@@ -746,6 +746,25 @@ function resetInputBox() {
                 pre.insertBefore(header, codeEl);
             });
         }
+        function downloadImageViaJS(url, filename) {
+    fetch(url)
+        .then(response => response.blob())
+        .then(blob => {
+            const blobUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(blobUrl);
+            document.body.removeChild(a);
+        })
+        .catch(() => {
+            // Agar CORS issue ki wajah se fetch na ho to fallback direct link download
+            window.open(url, '_blank');
+        });
+        }
 
     </script>
 </body>
