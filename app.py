@@ -11,19 +11,19 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 AVAILABLE_MODELS = {
     "image-gen": "🎨 Image Generator (FLUX AI)",
-    "llama-groq": "Llama 70B Meta AI(Lightning Fast)",
+    "llama-groq": "Llama 70B Meta AI (Lightning Fast)",
     "gpt-5.4-mini": "GPT-5.4",
     "deepseek": "DeepSeek V3.2 (Reasoning)",
     "openai": "GPT-4o (Standard)",
     "llama": "Llama 3.3 70B (Meta AI)",
     "mistral": "Mistral 4 Uncensored",
     "glm": "Z.ai GLM 5",
-    "qwen-coder": "Qwen 2.5 Coding Agent(Tech Use)",
+    "qwen-coder": "Qwen 2.5 Coding Agent (Tech Use)",
     "kimi": "Kimi K2.5 (Default)",
     "kimi-code": "Kimi K2.6 (Strong Agentic)"
 }
 
-# 🏠 ROOT ROUTE (Yeh missing hone se 404 aatha tha)
+# 🏠 ROOT ROUTE
 @app.route('/')
 def index():
     return render_template('index.html', models=AVAILABLE_MODELS)
@@ -65,25 +65,26 @@ def chat_stream():
                     "response_format": "url"
                 }
 
-                response = requests.post(url, json=payload, headers=headers, timeout=25)
+                response = requests.post(url, json=payload, headers=headers, timeout=30)
                 
                 if response.status_code == 200:
                     res_json = response.json()
                     img_url = res_json['data'][0]['url'] if res_json.get('data') else None
                     
                     if img_url:
+                        # 📥 direct download ke liye onclick event lagaya gaya hai
                         img_html = f'''
 <div class="generated-img-container" style="margin-top:10px;">
     <img src="{img_url}" alt="Generated Image" style="max-width:100%; border-radius:12px; border:1px solid #1e2335; box-shadow:0 8px 20px rgba(0,0,0,0.4);" />
     <br>
-    <a href="{img_url}" download="asad-ai-generated.png" target="_blank" style="display:inline-block; margin-top:10px; background:#10b981; color:#fff; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:0.85rem; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
+    <button onclick="downloadImageViaJS('{img_url}', 'asad-ai-generated.png')" style="display:inline-block; margin-top:10px; background:#10b981; color:#fff; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; font-size:0.85rem; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
         📥 Download Image
-    </a>
+    </button>
 </div>
 '''
                         yield f"data: {json.dumps({'token': img_html})}\n\n"
                     else:
-                        yield f"data: {json.dumps({'error': 'Image URL not found.'})}\n\n"
+                        yield f"data: {json.dumps({'error': 'Image URL not found in API response.'})}\n\n"
                 else:
                     yield f"data: {json.dumps({'error': f'API Error {response.status_code}'})}\n\n"
 
@@ -92,7 +93,7 @@ def chat_stream():
 
         return Response(generate_image(), mimetype='text/event-stream', headers=get_stream_headers())
 
-    # ⚡ ROUTE B: GROQ
+    # ⚡ ROUTE B: GROQ CHAT
     elif selected_model == "llama-groq":
         def generate_groq():
             yield "data: [STATUS: Brainstorming via Groq...] 🧠\n\n"
@@ -127,7 +128,7 @@ def chat_stream():
 
         return Response(generate_groq(), mimetype='text/event-stream', headers=get_stream_headers())
 
-    # 🧠 ROUTE C: POLLINATIONS CHAT
+    # 🧠 ROUTE C: POLLINATIONS CHAT MODELS
     else:
         def generate_pollinations():
             yield f"data: [STATUS: Core Engine Linked -> {selected_model}] 🧠\n\n"
@@ -165,4 +166,3 @@ def chat_stream():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-    
