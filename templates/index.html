@@ -503,7 +503,8 @@ html, body {
                 actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="copyText('${base64Str}', 'Response')">📂 Copy response</div></div>`;
             }
 
-            let htmlContent = sender === 'User' ? escapeHtml(text) : marked.parse(text);
+            // 🖼️ Saved history se chat reload karte waqt agar Image HTML tag mile toh direct load kare
+            let htmlContent = sender === 'User' ? escapeHtml(text) : (text.includes('<div class="generated-img-container"') ? text : marked.parse(text));
             let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
 
             wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
@@ -668,13 +669,18 @@ html, body {
                             const jsonStr = cleanLine.replace('data: ', '');
                             const parsed = JSON.parse(jsonStr);
                          if (parsed.token) {
-                                if (firstToken) { textNode.innerText = ""; firstToken = false; }
-                                completeAiResponse += parsed.token;
-                                textNode.innerHTML = marked.parse(completeAiResponse);
-                                attachCodeCopyButtons(wrapperDiv);
-                            } else if (parsed.error) {
-                                textNode.innerText = `\n🚨 Tunnel Fail: ${parsed.error}`;
-                            }
+    if (firstToken) { textNode.innerText = ""; firstToken = false; }
+    completeAiResponse += parsed.token;
+
+    // 🎨 Image Generator ke HTML Output aur Markdown Text dono ko handle karne ke liye check:
+    if (selectedModelGlobal === 'image-gen') {
+        textNode.innerHTML = completeAiResponse; // Direct HTML Render (Image & Download Button)
+    } else {
+        textNode.innerHTML = marked.parse(completeAiResponse); // Normal Markdown text
+        attachCodeCopyButtons(wrapperDiv);
+    }
+}
+
                         } catch(e) {}
                         chatBox.scrollTop = chatBox.scrollHeight;
                     }
