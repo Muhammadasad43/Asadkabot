@@ -1,31 +1,42 @@
 import os
 import json
-import base64
 import urllib.parse
 import requests
 from flask import Flask, render_template, request, Response
 
 app = Flask(__name__)
 
-# 🔒 ENVIRONMENT VARIABLES
-POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "").strip()
+# 🔑 DYNAMIC MULTI-TOKEN LOADER (Render Environment Variables)
+# System automatically POLLINATIONS_API_KEY, POLLINATION2, POLLINATION3... sab utha lega
+POLLINATIONS_API_KEYS = []
+
+# Primary Key
+primary_key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
+if primary_key:
+    POLLINATIONS_API_KEYS.append(primary_key)
+
+# Sequential Keys like POLLINATION2, POLLINATION3, POLLINATION4 etc.
+for env_name, env_val in os.environ.items():
+    if env_name.startswith("POLLINATION") and env_name != "POLLINATIONS_API_KEY":
+        val = env_val.strip()
+        if val and val not in POLLINATIONS_API_KEYS:
+            POLLINATIONS_API_KEYS.append(val)
+
+# Fallback/Dummy key list check
+print(f"✅ Active Pollinations Keys Loaded: {len(POLLINATIONS_API_KEYS)}")
+
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 
 AVAILABLE_MODELS = {
-    "image-gen": "🎨 Image Generator (FLUX AI)",
+    "image-gen": "🎨 Fast Image Generator (FLUX AI)",
     "llama-groq": "Llama 70B Meta AI (Lightning Fast)",
     "gpt-5.4-mini": "GPT-5.4",
     "deepseek": "DeepSeek V3.2 (Reasoning)",
     "openai": "GPT-4o (Standard)",
     "llama": "Llama 3.3 70B (Meta AI)",
-    "mistral": "Mistral 4 Uncensored",
-    "glm": "Z.ai GLM 5",
-    "qwen-coder": "Qwen 2.5 Coding Agent (Tech Use)",
-    "kimi": "Kimi K2.5 (Default)",
-    "kimi-code": "Kimi K2.6 (Strong Agentic)"
+    "mistral": "Mistral 4 Uncensored"
 }
 
-# 🏠 ROOT ROUTE
 @app.route('/')
 def index():
     return render_template('index.html', models=AVAILABLE_MODELS)
@@ -36,6 +47,10 @@ def get_stream_headers():
         'X-Accel-Buffering': 'no',
         'Connection': 'keep-alive'
     }
+
+# Function to get a working token from the pool
+def get_valid_token():
+    return POLLINATIONS_API_KEYS[0] if POLLINATIONS_API_KEYS else ""
 
 @app.route('/chat_stream', methods=['POST'])
 def chat_stream():
@@ -48,50 +63,41 @@ def chat_stream():
 
     last_user_message = history_messages[-1]['content'] if history_messages else ""
 
-    # 🎨 ROUTE A: NEW TESTED DIRECT GET IMAGE GENERATOR
+    # ==========================================
+    # 🖼️ ROUTE 1: FAST INSTANT IMAGE GENERATION
+    # ==========================================
     if selected_model == "image-gen":
         def generate_image():
-            yield "data: [STATUS: Generating artwork via Pollinations GET Endpoint...] 🎨\n\n"
+            yield "data: [STATUS: Generating image link...] 🎨\n\n"
             try:
-                # Prompt ko URL Safe Encode karna
                 encoded_prompt = urllib.parse.quote(last_user_message)
+                active_key = get_valid_token()
                 
-                # Tested GET Endpoint URL
-                url = f"https://gen.pollinations.ai/image/{encoded_prompt}?model=flux&width=1024&height=1024"
-                
-                headers = {}
-                if POLLINATIONS_API_KEY:
-                    headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
+                # Image Direct CDN URL (Fast Load)
+                image_url = f"https://gen.pollinations.ai/image/{encoded_prompt}?model=flux&width=1024&height=1024"
+                if active_key:
+                    image_url += f"&key={active_key}"
 
-                # Image Fetch karna
-                response = requests.get(url, headers=headers, timeout=45)
-                
-                if response.status_code == 200:
-                    # Raw Image Data ko Base64 String mein convert karna
-                    base64_img = base64.b64encode(response.content).decode('utf-8')
-                    mime_type = response.headers.get('Content-Type', 'image/jpeg')
-                    data_url = f"data:{mime_type};base64,{base64_img}"
-                    
-                    # Clean HTML layout
-                    img_html = f'''
+                # Browser immediate render element + Direct Download button
+                img_html = f'''
 <div class="generated-img-container" style="margin-top:10px;">
-    <img src="{data_url}" alt="Generated Image" style="max-width:100%; border-radius:12px; border:1px solid #1e2335; box-shadow:0 8px 20px rgba(0,0,0,0.4);" />
+    <img src="{image_url}" alt="Generated Image" loading="eager" style="max-width:100%; border-radius:12px; border:1px solid #1e2335; box-shadow:0 8px 20px rgba(0,0,0,0.4);" />
     <br>
-    <button onclick="downloadImageViaJS('{data_url}', 'asad-ai-generated.png')" style="display:inline-block; margin-top:10px; background:#10b981; color:#fff; padding:8px 16px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; font-size:0.85rem; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
-        📥 Download Image
-    </button>
+    <a href="{image_url}" target="_blank" download="pollinations-artwork.jpg" style="display:inline-block; margin-top:10px; background:#10b981; color:#fff; padding:8px 16px; border-radius:8px; text-decoration:none; font-weight:bold; font-size:0.85rem; box-shadow:0 4px 12px rgba(16,185,129,0.3);">
+        📥 Open / Download Image
+    </a>
 </div>
 '''
-                    yield f"data: {json.dumps({'token': img_html})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'error': f'API Error {response.status_code}: {response.text}'})}\n\n"
+                yield f"data: {json.dumps({'token': img_html})}\n\n"
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return Response(generate_image(), mimetype='text/event-stream', headers=get_stream_headers())
 
-    # ⚡ ROUTE B: GROQ CHAT
+    # ==========================================
+    # 🧠 ROUTE 2: TEXT STREAMING (GROQ / LLAMA)
+    # ==========================================
     elif selected_model == "llama-groq":
         def generate_groq():
             yield "data: [STATUS: Brainstorming via Groq...] 🧠\n\n"
@@ -126,16 +132,20 @@ def chat_stream():
 
         return Response(generate_groq(), mimetype='text/event-stream', headers=get_stream_headers())
 
-    # 🧠 ROUTE C: POLLINATIONS CHAT MODELS
+    # ==========================================
+    # 💬 ROUTE 3: OTHER POLLINATIONS TEXT MODELS
+    # ==========================================
     else:
         def generate_pollinations():
-            yield f"data: [STATUS: Core Engine Linked -> {selected_model}] 🧠\n\n"
+            yield f"data: [STATUS: Core Engine -> {selected_model}] 🧠\n\n"
             try:
                 url = "https://gen.pollinations.ai/v1/chat/completions"
-                headers = {
-                    "Authorization": f"Bearer {POLLINATIONS_API_KEY}",
-                    "Content-Type": "application/json"
-                }
+                
+                active_key = get_valid_token()
+                headers = {"Content-Type": "application/json"}
+                if active_key:
+                    headers["Authorization"] = f"Bearer {active_key}"
+
                 payload = {
                     "model": selected_model,
                     "messages": history_messages,
@@ -164,4 +174,4 @@ def chat_stream():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-                    
+        
