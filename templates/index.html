@@ -370,7 +370,7 @@ html, body {
     <img id="modalImg" src="" style="max-width: 92%; max-height: 82%; border-radius: 16px; object-fit: contain;" />
 </div>
     <script>
-        let currentChatId = null;
+                let currentChatId = null;
         let editingLogIndex = null;
         let selectedModelGlobal = "llama-groq";
 
@@ -391,18 +391,21 @@ html, body {
             });
 
             document.addEventListener('click', () => {
-                document.getElementById('custom-dropdown-menu').classList.remove('show');
+                const dropdownMenu = document.getElementById('custom-dropdown-menu');
+                if(dropdownMenu) dropdownMenu.classList.remove('show');
             });
         };
 
         function toggleDropdown(event) {
             event.stopPropagation();
-            document.getElementById('custom-dropdown-menu').classList.toggle('show');
+            const dropdownMenu = document.getElementById('custom-dropdown-menu');
+            if(dropdownMenu) dropdownMenu.classList.toggle('show');
         }
 
         function selectModel(key, name) {
             selectedModelGlobal = key;
-            document.getElementById('custom-dropdown-trigger').innerText = name + " ▾";
+            const trigger = document.getElementById('custom-dropdown-trigger');
+            if(trigger) trigger.innerText = name + " ▾";
 
             const items = document.querySelectorAll('.dropdown-item');
             items.forEach(item => {
@@ -412,20 +415,25 @@ html, body {
                     item.classList.remove('selected');
                 }
             });
-            document.getElementById('custom-dropdown-menu').classList.remove('show');
+            const dropdownMenu = document.getElementById('custom-dropdown-menu');
+            if(dropdownMenu) dropdownMenu.classList.remove('show');
         }
 
         function dismissWelcome() {
             localStorage.setItem('started_asad_ai', 'true');
-            document.getElementById('welcome-overlay').style.opacity = '0';
-            setTimeout(() => {
-                document.getElementById('welcome-overlay').style.display = 'none';
-            }, 250);
+            const overlay = document.getElementById('welcome-overlay');
+            if(overlay) {
+                overlay.style.opacity = '0';
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                }, 250);
+            }
             if(!currentChatId) createNewChat();
         }
 
         function loadSessions() {
             const container = document.getElementById('recent-chats-container');
+            if(!container) return;
             container.innerHTML = '';
             const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
             const sortedIds = Object.keys(sessions).sort((a,b) => sessions[b].timestamp - sessions[a].timestamp);
@@ -464,11 +472,13 @@ html, body {
 
         function openClearModal() {
             if(!currentChatId) return;
-            document.getElementById('custom-confirm-modal').classList.add('show');
+            const modal = document.getElementById('custom-confirm-modal');
+            if(modal) modal.classList.add('show');
         }
 
         function confirmClearAction(isConfirmed) {
-            document.getElementById('custom-confirm-modal').classList.remove('show');
+            const modal = document.getElementById('custom-confirm-modal');
+            if(modal) modal.classList.remove('show');
             if(isConfirmed && currentChatId) {
                 cancelEditMode();
                 const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
@@ -493,6 +503,7 @@ html, body {
 
         function renderActiveLogs() {
             const chatBox = document.getElementById('chat-box');
+            if(!chatBox) return;
             chatBox.innerHTML = '<div class="msg-row" style="align-items: flex-start;"><div class="message ai">Made by solo developer Asad. Creating masterpieces ⚡</div></div>';
 
             const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
@@ -504,10 +515,11 @@ html, body {
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-            function appendBubbleToUI(sender, text, index, isEdited) {
+        function appendBubbleToUI(sender, text, index, isEdited) {
             const chatBox = document.getElementById('chat-box');
+            if(!chatBox) return;
             const wrapperDiv = document.createElement('div');
-            
+
             wrapperDiv.className = `msg-row ${sender === 'User' ? 'user-set' : 'ai-set'}`;
 
             let actionHtml = '';
@@ -519,17 +531,15 @@ html, body {
                 actionHtml = `<div class="msg-actions"><div class="action-btn" onclick="copyText('${base64Str}', 'Response')">📂 Copy response</div></div>`;
             }
 
-            // 🖼️ Saved history se chat reload karte waqt agar Image HTML tag mile toh direct load kare
-            let htmlContent = sender === 'User' ? escapeHtml(text) : (text.includes('<div class="generated-img-container"') ? text : marked.parse(text));
+            let htmlContent = sender === 'User' ? escapeHtml(text) : (text.includes('<div') || text.includes('<img') ? text : marked.parse(text));
             let editedIndicator = (sender === 'User' && isEdited) ? `<span class="edited-lbl">(Edited)</span>` : '';
 
-            wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase()}">${htmlContent}</div>${actionHtml}`;
-            
-            // ⚡ Agar AI ka response hai toh code block dhoondh kar button lagao
+            wrapperDiv.innerHTML = `${editedIndicator}<div class="message ${sender.toLowerCase().replace(/\s+/g, '')}">${htmlContent}</div>${actionHtml}`;
+
             if (sender !== 'User') {
                 attachCodeCopyButtons(wrapperDiv);
             }
-            
+
             chatBox.appendChild(wrapperDiv);
         }
 
@@ -541,50 +551,53 @@ html, body {
             if(!targetLog || targetLog.sender !== 'User') return;
 
             editingLogIndex = index;
-            document.getElementById('user-input').value = targetLog.text;
-            document.getElementById('edit-mode-status').style.display = 'block';
-            document.getElementById('user-input').focus();
+            const inputEl = document.getElementById('user-input');
+            const statusEl = document.getElementById('edit-mode-status');
+            if(inputEl) {
+                inputEl.value = targetLog.text;
+                inputEl.focus();
+                autoResizeInput(inputEl);
+            }
+            if(statusEl) statusEl.style.display = 'block';
         }
 
         function cancelEditMode() {
             editingLogIndex = null;
-            document.getElementById('edit-mode-status').style.display = 'none';
-            document.getElementById('user-input').value = '';
+            const statusEl = document.getElementById('edit-mode-status');
+            const inputEl = document.getElementById('user-input');
+            if(statusEl) statusEl.style.display = 'none';
+            if(inputEl) resetInputBox();
         }
 
         function copyText(encodedBase64, type) {
             const decoded = decodeURIComponent(escape(atob(encodedBase64)));
             navigator.clipboard.writeText(decoded).then(() => {
                 const toast = document.getElementById('toast-notification');
-                toast.innerText = `Copied ${type} ⚡`;
-                toast.classList.add('show');
-                setTimeout(() => { toast.classList.remove('show'); }, 2000);
+                if(toast) {
+                    toast.innerText = `Copied ${type} ⚡`;
+                    toast.classList.add('show');
+                    setTimeout(() => { toast.classList.remove('show'); }, 2000);
+                }
             });
         }
 
-        // 🧠 CLIENT-SIDE MEMORY LOGIC GENERATION
         function buildHistoryPayload(sessions, text, selectedModel) {
             let payloadMessages = [];
-            
+
             if (editingLogIndex !== null) {
-                // Scenario A: Row edit mode -> pick logs ONLY up to the index being edited
                 for (let i = 0; i < editingLogIndex; i++) {
                     let log = sessions[currentChatId].logs[i];
                     let role = (log.sender === 'User') ? 'user' : 'assistant';
                     payloadMessages.push({ role: role, content: log.text });
                 }
-                // Append the updated edited string text as the latest current user prompt node
                 payloadMessages.push({ role: 'user', content: text });
             } else {
-                // Scenario B: Standard new message -> fetch all historical log objects safely
                 sessions[currentChatId].logs.forEach(log => {
-                    // Filter safety: Skip user prompt if it's the one we just pushed locally to prevent duplication
                     let role = (log.sender === 'User') ? 'user' : 'assistant';
                     payloadMessages.push({ role: role, content: log.text });
                 });
             }
 
-            // System instructions fallback override according to models mapping context profiles
             let systemPrompt = "You are Asad AI, a helpful assistant built by solo developer Asad.";
             if (selectedModel.includes("coder")) {
                 systemPrompt = "You are Asad AI (Qwen Coder Engine). Provide excellent clean code instructions.";
@@ -597,139 +610,139 @@ html, body {
         }
 
         function sendMessage() {
-    const inputEl = document.getElementById('user-input');
-    let text = inputEl.value.trim();
-    let selectedModel = selectedModelGlobal;
+            const inputEl = document.getElementById('user-input');
+            if(!inputEl) return;
+            let text = inputEl.value.trim();
+            let selectedModel = selectedModelGlobal;
 
-    if (!text) return;
-    if(!currentChatId) createNewChat();
+            if (!text) return;
+            if(!currentChatId) createNewChat();
 
-    const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
-    if(!sessions[currentChatId]) return;
+            const sessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
+            if(!sessions[currentChatId]) return;
 
-    if (editingLogIndex !== null) {
-        sessions[currentChatId].logs[editingLogIndex].text = text;
-        sessions[currentChatId].logs[editingLogIndex].isEdited = true;
-        sessions[currentChatId].logs.splice(editingLogIndex + 1);
-        if(editingLogIndex === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
-        localStorage.setItem('asad_sessions', JSON.stringify(sessions));
-    } else {
-        if(sessions[currentChatId].logs.length === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
-        sessions[currentChatId].logs.push({sender: 'User', text: text, isEdited: false});
-        localStorage.setItem('asad_sessions', JSON.stringify(sessions));
-    }
+            if (editingLogIndex !== null) {
+                sessions[currentChatId].logs[editingLogIndex].text = text;
+                sessions[currentChatId].logs[editingLogIndex].isEdited = true;
+                sessions[currentChatId].logs.splice(editingLogIndex + 1);
+                if(editingLogIndex === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
+                localStorage.setItem('asad_sessions', JSON.stringify(sessions));
+            } else {
+                if(sessions[currentChatId].logs.length === 0) sessions[currentChatId].title = text.substring(0, 24) + "...";
+                sessions[currentChatId].logs.push({sender: 'User', text: text, isEdited: false});
+                localStorage.setItem('asad_sessions', JSON.stringify(sessions));
+            }
 
-    // ⚡ Compile the dynamic history payload according to current memory state variable array
-    const structuralHistoryPayload = buildHistoryPayload(sessions, text, selectedModel);
+            const structuralHistoryPayload = buildHistoryPayload(sessions, text, selectedModel);
 
-    if (editingLogIndex !== null) {
-        cancelEditMode();
-    }
+            if (editingLogIndex !== null) {
+                cancelEditMode();
+            }
 
-    renderActiveLogs();
-    
-    // 🎯 INPUT BOX RESET MECHANICS
-    inputEl.value = '';
-    resetInputBox(); // Message send hote hi textarea ko 1 line par reset karega
+            renderActiveLogs();
+            resetInputBox();
 
-    // 🎯 AI CHAT BUBBLE STREAMING AREA (With dynamic 'ai-set' class for precise layout gaps)
-    const chatBox = document.getElementById('chat-box');
-    const wrapperDiv = document.createElement('div');
-    wrapperDiv.className = 'msg-row ai-set'; 
-    wrapperDiv.innerHTML = `<div class="message ai"><div id="log-zone"></div><span id="text-node">Generating response...</span></div>`;
-    chatBox.appendChild(wrapperDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
+            const chatBox = document.getElementById('chat-box');
+            const wrapperDiv = document.createElement('div');
+            wrapperDiv.className = 'msg-row ai-set';
+            wrapperDiv.innerHTML = `<div class="message ai"><div id="log-zone"></div><span id="text-node">Generating response...</span></div>`;
+            chatBox.appendChild(wrapperDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
 
-    const logZone = wrapperDiv.querySelector('#log-zone');
-    const textNode = wrapperDiv.querySelector('#text-node');
+            const logZone = wrapperDiv.querySelector('#log-zone');
+            const textNode = wrapperDiv.querySelector('#text-node');
 
-    // 🌐 Direct call to local `/chat_stream` on the same Render host domain wrapper
-    fetch('/chat_stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-            messages: structuralHistoryPayload, 
-            model: selectedModel 
-        })
-    }).then(response => {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let completeAiResponse = "";
-        let firstToken = true;
+            fetch('/chat_stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    messages: structuralHistoryPayload,
+                    model: selectedModel
+                })
+            }).then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let completeAiResponse = "";
+                let firstToken = true;
 
-        function readChunk() {
-            reader.read().then(({ done, value }) => {
-                if (done) {
-                    if(completeAiResponse) {
-                        const freshSessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
-                        if(freshSessions[currentChatId]) {
-                            freshSessions[currentChatId].logs.push({sender: 'Asad AI', text: completeAiResponse});
-                            freshSessions[currentChatId].timestamp = Date.now();
-                            localStorage.setItem('asad_sessions', JSON.stringify(freshSessions));
-                            loadSessions();
+                function readChunk() {
+                    reader.read().then(({ done, value }) => {
+                        if (done) {
+                            if(completeAiResponse) {
+                                const freshSessions = JSON.parse(localStorage.getItem('asad_sessions') || '{}');
+                                if(freshSessions[currentChatId]) {
+                                    freshSessions[currentChatId].logs.push({sender: 'Asad AI', text: completeAiResponse});
+                                    freshSessions[currentChatId].timestamp = Date.now();
+                                    localStorage.setItem('asad_sessions', JSON.stringify(freshSessions));
+                                    loadSessions();
+                                }
+                            }
+                            return;
                         }
-                    }
-                    return;
+
+                        const chunkStr = decoder.decode(value);
+                        const lines = chunkStr.split('\n');
+
+                        lines.forEach(line => {
+                            let cleanLine = line.trim();
+                            if (cleanLine.startsWith('data: [STATUS:')) {
+                                if(logZone) logZone.innerHTML = `<div class="search-log">${escapeHtml(cleanLine.replace('data: ', ''))}</div>`;
+                            } else if (cleanLine.startsWith('data: ')) {
+                                if (cleanLine === "data: [DONE]") return;
+                                const rawStr = cleanLine.replace('data: ', '');
+                                
+                                try {
+                                    const parsed = JSON.parse(rawStr);
+                                    if (parsed.token) {
+                                        if (firstToken) { textNode.innerText = ""; firstToken = false; }
+                                        completeAiResponse += parsed.token;
+                                    }
+                                } catch(e) {
+                                    if (firstToken) { textNode.innerText = ""; firstToken = false; }
+                                    completeAiResponse += rawStr;
+                                }
+
+                                if (selectedModelGlobal === 'image-gen' || completeAiResponse.includes('<div') || completeAiResponse.includes('<img')) {
+                                    textNode.innerHTML = completeAiResponse;
+                                } else {
+                                    textNode.innerHTML = marked.parse(completeAiResponse);
+                                    attachCodeCopyButtons(wrapperDiv);
+                                }
+
+                                chatBox.scrollTop = chatBox.scrollHeight;
+                            }
+                        });
+                        readChunk();
+                    });
                 }
-
-                const chunkStr = decoder.decode(value);
-                const lines = chunkStr.split('\n');
-
-                lines.forEach(line => {
-                    let cleanLine = line.trim();
-                    if (cleanLine.startsWith('data: [STATUS:')) {
-                        logZone.innerHTML = `<div class="search-log">${escapeHtml(cleanLine.replace('data: ', ''))}</div>`;
-                    } else if (cleanLine.startsWith('data: ')) {
-                        if (cleanLine === "data: [DONE]") return;
-                        try {
-                            const jsonStr = cleanLine.replace('data: ', '');
-                            const parsed = JSON.parse(jsonStr);
-                         if (parsed.token) {
-    if (firstToken) { textNode.innerText = ""; firstToken = false; }
-    completeAiResponse += parsed.token;
-
-    // 🎨 Image Generator ke HTML Output aur Markdown Text dono ko handle karne ke liye check:
-    if (selectedModelGlobal === 'image-gen') {
-        textNode.innerHTML = completeAiResponse; // Direct HTML Render (Image & Download Button)
-    } else {
-        textNode.innerHTML = marked.parse(completeAiResponse); // Normal Markdown text
-        attachCodeCopyButtons(wrapperDiv);
-    }
-}
-
-                        } catch(e) {}
-                        chatBox.scrollTop = chatBox.scrollHeight;
-                    }
-                });
                 readChunk();
-            });
+            }).catch(() => { if(textNode) textNode.innerText = `\n🚨 Pipeline connection drops down.`; });
         }
-        readChunk();
-    }).catch(() => { textNode.innerText = `\n🚨 Pipeline connection drops down.`; });
-                    }
+
         function escapeHtml(text) {
             return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        }    
-        // 🎯 Input box ko text ke mutabiq bada karne ke liye
-function autoResizeInput(textarea) {
-    textarea.style.height = 'auto';
-    textarea.style.height = textarea.scrollHeight + 'px';
-}
+        }
 
-function resetInputBox() {
-    const textarea = document.getElementById('user-input');
-    if (textarea) {
-        textarea.value = '';
-        textarea.style.height = '24px'; /* ➔ Wapis original single-line height par clear karega */
-    }
-}   
-                function attachCodeCopyButtons(container) {
+        function autoResizeInput(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+
+        function resetInputBox() {
+            const textarea = document.getElementById('user-input');
+            if (textarea) {
+                textarea.value = '';
+                textarea.style.height = '24px';
+            }
+        }
+
+        function attachCodeCopyButtons(container) {
             const preBlocks = container.querySelectorAll('pre');
             preBlocks.forEach((pre) => {
                 if (pre.querySelector('.code-header')) return;
                 const codeEl = pre.querySelector('code');
                 if (!codeEl) return;
-                
+
                 let lang = 'code';
                 if (codeEl.className && codeEl.className.startsWith('language-')) {
                     lang = codeEl.className.replace('language-', '');
@@ -745,15 +758,17 @@ function resetInputBox() {
                 const btn = document.createElement('button');
                 btn.className = 'code-copy-btn';
                 btn.innerHTML = '📋';
-                
+
                 btn.onclick = function(e) {
                     e.stopPropagation();
                     const textToCopy = codeEl.innerText;
                     navigator.clipboard.writeText(textToCopy).then(() => {
                         const toast = document.getElementById('toast-notification');
-                        toast.innerText = `Code Copied`;
-                        toast.classList.add('show');
-                        setTimeout(() => { toast.classList.remove('show'); }, 2000);
+                        if(toast) {
+                            toast.innerText = `Code Copied`;
+                            toast.classList.add('show');
+                            setTimeout(() => { toast.classList.remove('show'); }, 2000);
+                        }
                     });
                 };
 
@@ -762,60 +777,43 @@ function resetInputBox() {
                 pre.insertBefore(header, codeEl);
             });
         }
-        function downloadImageViaJS(url, filename) {
-    fetch(url)
-        .then(response => response.blob())
-        .then(blob => {
-            const blobUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = blobUrl;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(blobUrl);
-            document.body.removeChild(a);
-        })
-        .catch(() => {
-            // Agar CORS issue ki wajah se fetch na ho to fallback direct link download
-            window.open(url, '_blank');
-        });
+
+        async function downloadImageDirect(imgUrl) {
+            try {
+                const response = await fetch(imgUrl);
+                const blob = await response.blob();
+                const blobUrl = window.URL.createObjectURL(blob);
+
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = `Pollinations_${Date.now()}.jpg`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                window.URL.revokeObjectURL(blobUrl);
+            } catch (err) {
+                console.error("Download failed, opening direct link...", err);
+                window.open(imgUrl, '_blank');
+            }
         }
-// Function 1: Direct File Downloader (Android & PC support)
-async function downloadImageDirect(imgUrl) {
-    try {
-        const response = await fetch(imgUrl);
-        const blob = await response.blob();
-        const blobUrl = window.URL.createObjectURL(blob);
-        
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = `ASAD_AI_${Date.now()}.jpg`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        window.URL.revokeObjectURL(blobUrl);
-    } catch (err) {
-        window.open(imgUrl, '_blank');
-    }
-}
 
-// Function 2: Fullscreen Preview Open karne ke liye
-function openImageModal(url) {
-    const modal = document.getElementById('imageModal');
-    const modalImg = document.getElementById('modalImg');
-    const downloadBtn = document.getElementById('modalDownloadBtn');
-    
-    modalImg.src = url;
-    downloadBtn.onclick = function() { downloadImageDirect(url); };
-    modal.style.display = 'flex';
-}
+        function openImageModal(url) {
+            const modal = document.getElementById('imageModal');
+            const modalImg = document.getElementById('modalImg');
+            const downloadBtn = document.getElementById('modalDownloadBtn');
 
-// Function 3: Modal Close karne ke liye
-function closeImageModal() {
-    document.getElementById('imageModal').style.display = 'none';
-}
+            if(modal && modalImg) {
+                modalImg.src = url;
+                if(downloadBtn) downloadBtn.onclick = function() { downloadImageDirect(url); };
+                modal.style.display = 'flex';
+            }
+        }
+
+        function closeImageModal() {
+            const modal = document.getElementById('imageModal');
+            if(modal) modal.style.display = 'none';
+        }
     </script>
 </body>
 </html>
