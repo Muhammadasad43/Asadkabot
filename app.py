@@ -70,7 +70,7 @@ def chat_stream():
     last_user_message = history_messages[-1]['content'] if history_messages else ""
 
     # ---------------------------------------------------------
-    # 🖼️ ROUTE 1: INSTANT IMAGE GENERATION (Markdown Format)
+    # 🖼️ ROUTE 1: INSTANT IMAGE GENERATION (Gemini Style Compact Size)
     # ---------------------------------------------------------
     if selected_model == "image-gen":
         def generate_image():
@@ -84,10 +84,10 @@ def chat_stream():
                 if active_key:
                     image_url += f"&key={active_key}"
 
-                # Direct Markdown Image syntax to prevent HTML code block bug
-                markdown_output = f"![Generated Image]({image_url})"
+                # Gemini style compact image wrapper with inline styling
+                compact_img_html = f'<img src="{image_url}" alt="Generated Image" style="max-width:300px; width:100%; border-radius:18px; display:block; margin-top:8px; box-shadow:0 4px 15px rgba(0,0,0,0.3);" />'
                 
-                yield f"data: {json.dumps({'token': markdown_output})}\n\n"
+                yield f"data: {json.dumps({'token': compact_img_html})}\n\n"
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -173,4 +173,3 @@ def chat_stream():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-    
