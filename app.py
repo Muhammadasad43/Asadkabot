@@ -70,7 +70,7 @@ def chat_stream():
     last_user_message = history_messages[-1]['content'] if history_messages else ""
 
     # ---------------------------------------------------------
-    # 🖼️ ROUTE 1: INSTANT IMAGE GENERATION (With Download & Modal Trigger)
+    # 🖼️ ROUTE 1: INSTANT IMAGE GENERATION (Markdown Format)
     # ---------------------------------------------------------
     if selected_model == "image-gen":
         def generate_image():
@@ -84,19 +84,10 @@ def chat_stream():
                 if active_key:
                     image_url += f"&key={active_key}"
 
-                # Image Card HTML with overlay download button and tap-to-fullscreen
-                img_html = f'''
-<div class="image-card-wrapper" style="position: relative; display: inline-block; max-width: 85%; margin-top: 8px;">
-    <!-- Top-Right Download Icon -->
-    <button onclick="downloadImageDirect('{image_url}')" style="position: absolute; top: 12px; right: 12px; background: rgba(0, 0, 0, 0.65); color: #ffffff; border: none; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; z-index: 5; backdrop-filter: blur(4px);">
-        ⤓
-    </button>
-    
-    <!-- Generated Image (Opens fullscreen modal on click) -->
-    <img src="{image_url}" alt="Generated Image" onclick="openImageModal('{image_url}')" style="width: 100%; border-radius: 24px; display: block; cursor: pointer; object-fit: cover;" />
-</div>
-'''
-                yield f"data: {json.dumps({'token': img_html})}\n\n"
+                # Direct Markdown Image syntax to prevent HTML code block bug
+                markdown_output = f"![Generated Image]({image_url})"
+                
+                yield f"data: {json.dumps({'token': markdown_output})}\n\n"
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -182,4 +173,4 @@ def chat_stream():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-                
+    
