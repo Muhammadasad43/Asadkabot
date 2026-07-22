@@ -11,12 +11,10 @@ app = Flask(__name__)
 # =========================================================
 POLLINATIONS_API_KEYS = []
 
-# 1. Primary Key Check
 primary_key = os.environ.get("POLLINATIONS_API_KEY", "").strip()
 if primary_key:
     POLLINATIONS_API_KEYS.append(primary_key)
 
-# 2. Dynamic Keys Check (POLLINATION2, POLLINATION3, POLLINATION4, etc.)
 for env_name, env_val in os.environ.items():
     if env_name.startswith("POLLINATION") and env_name != "POLLINATIONS_API_KEY":
         val = env_val.strip()
@@ -52,7 +50,6 @@ def get_stream_headers():
     }
 
 def get_valid_token():
-    """Returns the first available token from the loaded list"""
     return POLLINATIONS_API_KEYS[0] if POLLINATIONS_API_KEYS else ""
 
 # =========================================================
@@ -70,7 +67,7 @@ def chat_stream():
     last_user_message = history_messages[-1]['content'] if history_messages else ""
 
     # ---------------------------------------------------------
-    # 🖼️ ROUTE 1: INSTANT IMAGE GENERATION (Gemini Style Compact Size)
+    # 🖼️ ROUTE 1: INSTANT IMAGE GENERATION (With Download & Fullscreen Trigger)
     # ---------------------------------------------------------
     if selected_model == "image-gen":
         def generate_image():
@@ -79,15 +76,14 @@ def chat_stream():
                 encoded_prompt = urllib.parse.quote(last_user_message)
                 active_key = get_valid_token()
                 
-                # Pollinations Direct Image URL
                 image_url = f"https://gen.pollinations.ai/image/{encoded_prompt}?model=flux&width=1024&height=1024"
                 if active_key:
                     image_url += f"&key={active_key}"
 
-                # Gemini style compact image wrapper with inline styling
-                compact_img_html = f'<img src="{image_url}" alt="Generated Image" style="max-width:300px; width:100%; border-radius:18px; display:block; margin-top:8px; box-shadow:0 4px 15px rgba(0,0,0,0.3);" />'
+                # Compact Gemini Card + Top Right Download Icon + Fullscreen Click Event
+                img_html = f'''<div style="position: relative; display: inline-block; max-width: 280px; margin-top: 8px;"><button onclick="downloadImageDirect('{image_url}')" style="position: absolute; top: 10px; right: 10px; background: rgba(0, 0, 0, 0.65); color: #ffffff; border: none; width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; z-index: 5; backdrop-filter: blur(4px);">⤓</button><img src="{image_url}" alt="Generated Image" onclick="openImageModal('{image_url}')" style="width: 100%; border-radius: 20px; display: block; cursor: pointer; object-fit: cover; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);" /></div>'''
                 
-                yield f"data: {json.dumps({'token': compact_img_html})}\n\n"
+                yield f"data: {json.dumps({'token': img_html})}\n\n"
 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -173,4 +169,4 @@ def chat_stream():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-    
+                
