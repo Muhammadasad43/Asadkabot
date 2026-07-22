@@ -329,6 +329,21 @@ html, body {
     <textarea id="user-input" rows="1" placeholder="Write message..." oninput="autoResizeInput(this)"></textarea>
     <button class="action-send-btn" onclick="sendMessage()">➔</button>
 </div>
+            <!-- Fullscreen Image Preview Modal -->
+<div id="imageModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.95); z-index: 99999; flex-direction: column; justify-content: center; align-items: center;">
+    
+    <!-- Top Bar with Back (←) and Download (⤓) -->
+    <div style="position: absolute; top: 20px; left: 0; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 100000;">
+        <button onclick="closeImageModal()" style="background: rgba(255, 255, 255, 0.15); color: #fff; border: none; width: 44px; height: 44px; border-radius: 50%; font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+            ←
+        </button>
+        <button id="modalDownloadBtn" onclick="" style="background: rgba(255, 255, 255, 0.15); color: #fff; border: none; width: 44px; height: 44px; border-radius: 50%; font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+            ⤓
+        </button>
+    </div>
+
+    <!-- Fullscreen Image -->
+    <img id="modalImg" src="" style="max-width: 95%; max-height: 85%; border-radius: 16px; object-fit: contain;" />
             <div class="config-toggles">
                 <span style="font-weight: 700; color: #475569; font-size: 0.75rem;">AI MODEL:</span>
 
@@ -765,7 +780,43 @@ function resetInputBox() {
             window.open(url, '_blank');
         });
         }
+// Function to force direct file download to Android Downloads folder
+async function downloadImageDirect(imgUrl) {
+    try {
+        const response = await fetch(imgUrl);
+        const blob = await response.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `Pollinations_${Date.now()}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+        console.error("Download failed, opening direct link...", err);
+        window.open(imgUrl, '_blank');
+    }
+}
 
+// Function to open full screen preview
+function openImageModal(url) {
+    const modal = document.getElementById('imageModal');
+    const modalImg = document.getElementById('modalImg');
+    const downloadBtn = document.getElementById('modalDownloadBtn');
+    
+    modalImg.src = url;
+    downloadBtn.onclick = function() { downloadImageDirect(url); };
+    modal.style.display = 'flex';
+}
+
+// Function to close modal (Back Button)
+function closeImageModal() {
+    const modal = document.getElementById('imageModal');
+    modal.style.display = 'none';
+}
     </script>
 </body>
 </html>
