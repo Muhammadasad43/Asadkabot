@@ -30,7 +30,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 # =========================================================
 AVAILABLE_MODELS = {
     "image-gen": "Image Generator (FLUX AI)",
-    "llama-groq": "Llama 3.3 70B (Groq Fast)",
+    "llama-groq": "OpenAI GPT-OSS Fast",
     "gpt-5.4-mini": "GPT-5.4 Mini",
     "deepseek": "DeepSeek V3.2",
     "openai": "GPT-4o (Standard)",
@@ -105,7 +105,7 @@ def chat_stream():
                     "Content-Type": "application/json"
                 }
                 payload = {
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": history_messages,
                     "stream": True
                 }
