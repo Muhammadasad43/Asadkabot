@@ -35,7 +35,7 @@ AVAILABLE_MODELS = {
     "deepseek": "DeepSeek V3.2",
     "openai": "GPT-4o (Standard)",
     "llama": "Llama 3.3 70B (Pollinations)",
-    "mistral": "Mistral 4 Uncensored"
+    "qwen-coder": "Qwen Coder (Pollinations)"
 }
 
 @app.route('/')
