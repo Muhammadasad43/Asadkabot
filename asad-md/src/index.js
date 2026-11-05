@@ -29,7 +29,7 @@ import { usePgAuthState, closePgAuth } from './auth-store.js';
 
 const PREFIX = '+';
 const MAX_COMMAND_AGE_SECONDS = 120;
-const logger = pino({ level: 'silent' });
+const logger = pino({ level: process.env.LOG_LEVEL || 'silent' });
 
 // Local cache directory — mirrors auth state to disk so a Neon hiccup
 // does not force a re-pair. Not authoritative; Postgres is the source
@@ -323,6 +323,7 @@ async function start() {
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
+      console.log('[Asad MD] close reason:', lastDisconnect?.error?.message, '|', lastDisconnect?.error?.stack?.split('\n').slice(0,3).join(' / '));
 
       if (statusCode === DisconnectReason.loggedOut) {
         console.log('\n[Asad MD] Logged out from WhatsApp. Not reconnecting.');
