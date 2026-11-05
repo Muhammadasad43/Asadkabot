@@ -18,6 +18,7 @@
 // The DATABASE_URL environment variable must be set.
 
 import pg from 'pg'
+import { initAuthCreds, proto } from '@whiskeysockets/baileys'
 
 const { Pool } = pg
 
@@ -94,7 +95,7 @@ function deserialize(value) {
     JSON.stringify(value),
     (k, v) => {
       if (v && typeof v === 'object' && typeof v.__buf === 'string') {
-        return new Uint8Array(Buffer.from(v.__buf, 'base64'))
+        return Buffer.from(v.__buf, 'base64')
       }
       return v
     }
@@ -105,7 +106,7 @@ export async function usePgAuthState() {
   await ensureSchema()
 
   const storedCreds = await readValue(CREDS_KEY)
-  const creds = storedCreds ? deserialize(storedCreds) : { registered: false }
+  const creds = storedCreds ? deserialize(storedCreds) : initAuthCreds()
 
   const state = {
     creds,
@@ -114,7 +115,13 @@ export async function usePgAuthState() {
         const result = {}
         for (const id of ids) {
           const raw = await readValue(keyFor(type, id))
-          if (raw !== null) result[id] = deserialize(raw)
+          if (raw !== null) {
+            let val = deserialize(raw)
+            if (type === 'app-state-sync-key' && val) {
+              val = proto.Message.AppStateSyncKeyData.fromObject(val)
+            }
+            result[id] = val
+          }
         }
         return result
       },

@@ -22,6 +22,8 @@ import makeWASocket, {
   Browsers,
   jidNormalizedUser,
   normalizeMessageContent,
+  initAuthCreds,
+  proto,
 } from '@whiskeysockets/baileys';
 
 import './store.js'; // side effect: creates schema on first import
@@ -69,7 +71,7 @@ function readCache(key) {
     if (!fs.existsSync(p)) return null;
     return JSON.parse(fs.readFileSync(p, 'utf8'), (k, v) => {
       if (v && typeof v === 'object' && typeof v.__buf === 'string') {
-        return new Uint8Array(Buffer.from(v.__buf, 'base64'));
+        return Buffer.from(v.__buf, 'base64');
       }
       return v;
     });
@@ -102,13 +104,13 @@ async function useCachedPgAuthState() {
     // fall back entirely to local cache
     const cachedCreds = readCache('creds');
     pgState = {
-      creds: cachedCreds || { registered: false },
+      creds: cachedCreds || initAuthCreds(),
       keys: {
         get: async (type, ids) => {
           const out = {};
           for (const id of ids) {
             const v = readCache(`${type}:${id}`);
-            if (v !== null) out[id] = v;
+            if (v !== null) out[id] = (type === 'app-state-sync-key' && v) ? proto.Message.AppStateSyncKeyData.fromObject(v) : v;
           }
           return out;
         },
@@ -323,7 +325,7 @@ async function start() {
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
-      console.log('[Asad MD] close reason:', lastDisconnect?.error?.message, '|', lastDisconnect?.error?.stack?.split('\n').slice(0,3).join(' / '));
+      console.log('[Asad MD] close reason:', lastDisconnect?.error?.message);
 
       if (statusCode === DisconnectReason.loggedOut) {
         console.log('\n[Asad MD] Logged out from WhatsApp. Not reconnecting.');
