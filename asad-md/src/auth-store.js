@@ -113,29 +113,56 @@ export async function usePgAuthState() {
     keys: {
       get: async (type, ids) => {
         const result = {}
-        for (const id of ids) {
-          const raw = await readValue(keyFor(type, id))
-          if (raw !== null) {
-            let val = deserialize(raw)
-            if (type === 'app-state-sync-key' && val) {
-              val = proto.Message.AppStateSyncKeyData.fromObject(val)
-            }
-            result[id] = val
+        if (!ids || ids.length === 0) return result
+        await ensureSchema()
+        const keys = ids.map((id) => keyFor(type, id))
+        const r = await getPool().query(
+          'SELECT key, value FROM asadmd_auth WHERE key = ANY($1::text[])',
+          [keys]
+        )
+        const prefix = `${type}:`
+        for (const row of r.rows) {
+          const id = row.key.slice(prefix.length)
+          let val = deserialize(row.value)
+          if (type === 'app-state-sync-key' && val) {
+            val = proto.Message.AppStateSyncKeyData.fromObject(val)
           }
+          result[id] = val
         }
         return result
       },
       set: async (data) => {
+        // Batched: one round trip per chunk instead of one per key. Hundreds of
+        // pre-keys are written at once and sequential writes to a remote
+        // Postgres cause Baileys' "Pre-key upload timeout".
+        await ensureSchema()
+        const upsertKeys = []
+        const upsertVals = []
+        const deleteKeys = []
         for (const type of Object.keys(data || {})) {
           const bucket = data[type]
           for (const id of Object.keys(bucket || {})) {
             const value = bucket[id]
             if (value === null || value === undefined) {
-              await deleteValue(keyFor(type, id))
+              deleteKeys.push(keyFor(type, id))
             } else {
-              await writeValue(keyFor(type, id), serialize(value))
+              upsertKeys.push(keyFor(type, id))
+              upsertVals.push(JSON.stringify(serialize(value)))
             }
           }
+        }
+        const p = getPool()
+        if (deleteKeys.length) {
+          await p.query('DELETE FROM asadmd_auth WHERE key = ANY($1::text[])', [deleteKeys])
+        }
+        const CHUNK = 300
+        for (let i = 0; i < upsertKeys.length; i += CHUNK) {
+          await p.query(
+            `INSERT INTO asadmd_auth (key, value, updated_at)
+             SELECT t.k, t.v::jsonb, $3 FROM unnest($1::text[], $2::text[]) AS t(k, v)
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+            [upsertKeys.slice(i, i + CHUNK), upsertVals.slice(i, i + CHUNK), Date.now()]
+          )
         }
       },
     },
