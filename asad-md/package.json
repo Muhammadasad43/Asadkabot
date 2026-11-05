@@ -1,0 +1,31 @@
+{
+  "name": "asad-md",
+  "version": "1.0.0",
+  "description": "Asad MD — local-first WhatsApp archiver. Records inbox text + voice notes, flags deleted-for-everyone messages, notes view-once events. Self-chat commands for retrieval. Postgres auth + storage for cloud deploys.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "check": "node --check src/index.js && node --check src/store.js && node --check src/auth-store.js && node --check src/handlers.js && node --check src/media.js && node --check src/commands.js",
+    "clean": "rm -rf auth-cache media data node_modules/.cache && echo cleaned"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc.13",
+    "express": "^4.19.2",
+    "pg": "^8.13.1",
+    "pino": "^10.3.1"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "archive",
+    "node",
+    "termux"
+  ],
+  "author": "Muhammad Asad",
+  "license": "MIT"
+}

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: asadkabot
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      # Flask app
+      - key: POLLINATIONS_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      # Asad MD bot
+      - key: DATABASE_URL
+        sync: false
+      - key: ASADMD_PHONE_NUMBER
+        sync: false

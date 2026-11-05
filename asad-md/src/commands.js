@@ -1,0 +1,488 @@
+// src/commands.js
+//
+// Self-chat command interface for Asad MD.
+//
+// Commands:
+//   +ShowNow                  — dump the archive grouped by sender
+//   +YesVoice<N>              — send voice note N from the last +ShowNow
+//   +YesView<N>               — send view-once item N from the last +ShowNow
+//   +DeleteAllChat            — confirms then wipes the messages table
+//   +DeleteAllChat confirm    — actually wipes
+//   +DeleteAllVoice           — confirms then deletes voice files on disk
+//   +DeleteAllVoice confirm   — actually deletes
+//
+// ── NEVER START A BOT REPLY WITH '+' ─────────────────────────────────────
+// index.js treats any self-chat message starting with '+' as a command.
+// Bot replies must never start with '+', or they loop.
+
+import fs from 'node:fs'
+import { store } from './store.js'
+
+let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
+let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteAll*
+
+const BATCH_TTL_MS = 30 * 60 * 1000
+const CONFIRM_TTL_MS = 60 * 1000
+const SEPARATOR = '────────────────────────'
+const HINT_BAR = '<><><><><><><><><><><><><><><><>'
+
+// ─── helpers ────────────────────────────────────────────────────────────
+function pad(n) {
+  return String(n).padStart(2, '0')
+}
+
+function formatTime(ms) {
+  const d = new Date(Number(ms))
+  if (Number.isNaN(d.getTime())) return 'unknown time'
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  )
+}
+
+function h12(n) {
+  return n % 12 === 0 ? 12 : n % 12
+}
+
+function formatDisplayTime(ms) {
+  const d = new Date(Number(ms))
+  if (Number.isNaN(d.getTime())) return 'unknown time'
+  const h24 = d.getHours()
+  const hour12 = h12(h24)
+  const meridiem = h24 < 12 ? 'AM' : 'PM'
+  const minutes = String(d.getMinutes()).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${hour12}:${minutes}${meridiem}`
+}
+
+function chunkText(text, maxChars = 60000) {
+  const PREFIX = '*(continued)*\n'
+  const blocks = text.split('\n\n')
+  const chunks = []
+  let current = ''
+  const room = () => maxChars - (chunks.length === 0 ? 0 : PREFIX.length)
+  const flush = () => {
+    if (current === '') return
+    chunks.push(chunks.length === 0 ? current : PREFIX + current)
+    current = ''
+  }
+  for (const block of blocks) {
+    if (block.length > maxChars - PREFIX.length) {
+      flush()
+      let rest = block
+      while (rest.length > 0) {
+        const piece = rest.slice(0, room())
+        rest = rest.slice(piece.length)
+        current = piece
+        flush()
+      }
+      continue
+    }
+    if (current === '') {
+      current = block
+    } else if (current.length + 2 + block.length <= room()) {
+      current += '\n\n' + block
+    } else {
+      flush()
+      current = block
+    }
+  }
+  flush()
+  return chunks.length ? chunks : [text]
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function displayLineFor(r, voiceIndexByMsgId, viewOnceIndexByMsgId) {
+  let line
+  if (r.type === 'text') {
+    line = r.content
+  } else if (r.type === 'voice') {
+    line = `🎤 Voice note (#${voiceIndexByMsgId.get(r.id) || '?'})`
+  } else if (r.type === 'viewonce') {
+    line = viewOnceIndexByMsgId.has(r.id)
+      ? `📷 ${r.content} (View #${viewOnceIndexByMsgId.get(r.id)})`
+      : `📷 ${r.content} [not saved]`
+  } else {
+    line = r.content
+  }
+  if (r.deleted === 1) line += '  (Deleted Message)'
+  return line
+}
+
+// ─── +ShowNow ───────────────────────────────────────────────────────────
+async function cmdShowNow(sock, m) {
+  const jid = m.key.remoteJid
+
+  let all = typeof store.getAll === 'function'
+    ? await store.getAll()
+    : await store.getMessages({ limit: 10000 })
+
+  if (!all || all.length === 0) {
+    await sock.sendMessage(jid, { text: 'Nothing recorded yet.' }, { quoted: m })
+    return
+  }
+
+  all = all.filter(
+    (r) =>
+      r.chat_jid &&
+      !r.chat_jid.endsWith('@g.us') &&
+      !r.chat_jid.endsWith('@newsletter') &&
+      !/^120363/.test(r.chat_jid) &&
+      r.chat_jid !== 'status@broadcast' &&
+      !r.chat_jid.endsWith('@broadcast')
+  )
+
+  if (all.length === 0) {
+    await sock.sendMessage(jid, { text: 'Nothing recorded yet.' }, { quoted: m })
+    return
+  }
+
+  all.sort((a, b) => a.timestamp - b.timestamp)
+
+  const voiceList = []
+  const voiceIndexByMsgId = new Map()
+  for (const r of all) {
+    if (r.type === 'voice' && r.media_path && fs.existsSync(r.media_path)) {
+      const idx = voiceList.length + 1
+      voiceList.push({ index: idx, id: r.id, sender_name: r.sender_name, timestamp: r.timestamp, media_path: r.media_path })
+      voiceIndexByMsgId.set(r.id, idx)
+    }
+  }
+
+  const viewOnceList = []
+  const viewOnceIndexByMsgId = new Map()
+  for (const r of all) {
+    if (r.type === 'viewonce' && r.media_path && fs.existsSync(r.media_path)) {
+      const idx = viewOnceList.length + 1
+      viewOnceList.push({ index: idx, id: r.id, sender_name: r.sender_name, timestamp: r.timestamp, media_path: r.media_path, content: r.content })
+      viewOnceIndexByMsgId.set(r.id, idx)
+    }
+  }
+
+  const blockOrder = []
+  const blockByKey = new Map()
+  let globalIndex = 0
+  for (const r of all) {
+    globalIndex++
+    const displayLine = displayLineFor(r, voiceIndexByMsgId, viewOnceIndexByMsgId)
+    const line = `${displayLine}  • ${formatDisplayTime(r.timestamp)}`
+    const key = r.sender_jid || r.sender_name
+    let block = blockByKey.get(key)
+    if (!block) {
+      block = { sender_name: r.sender_name, firstIndex: globalIndex, lines: [] }
+      blockByKey.set(key, block)
+      blockOrder.push(block)
+    }
+    block.lines.push(line)
+  }
+
+  const groupTexts = blockOrder.map(
+    (b) => `\`[${b.firstIndex}] ${b.sender_name}\`\n${b.lines.join('\n')}`
+  )
+
+  let body =
+    '*HERE IS YOUR RECENT MESSAGE HISTORY:*' +
+    '\n\n' +
+    '*📝 MESSAGES:*' +
+    '\n\n' +
+    groupTexts.join('\n\n') +
+    '\n' +
+    SEPARATOR
+
+  const trailing = []
+
+  if (voiceList.length > 0) {
+    const voiceLines = voiceList.map(
+      (v) => `\`${v.sender_name}: Voice${v.index}\`  • ${formatDisplayTime(v.timestamp)}`
+    )
+    trailing.push(`*🎤 VOICE NOTES (Total: ${voiceList.length}):*\n${voiceLines.join('\n')}`)
+  }
+
+  if (viewOnceList.length > 0) {
+    const viewLines = viewOnceList.map(
+      (v) => `\`${v.sender_name}: View${v.index}\`  • ${formatDisplayTime(v.timestamp)}  • ${v.content}`
+    )
+    trailing.push(`*📷 VIEW-ONCE ITEMS (Total: ${viewOnceList.length}):*\n${viewLines.join('\n')}`)
+  }
+
+  if (trailing.length > 0) {
+    body += '\n\n' + trailing.join('\n\n' + SEPARATOR + '\n\n')
+  }
+
+  const hints = []
+  if (voiceList.length > 0 || viewOnceList.length > 0) {
+    hints.push(HINT_BAR)
+    if (voiceList.length > 0) {
+      hints.push('Reply *+YesVoiceN* to receive voice note N.')
+      hints.push('(Example: +YesVoice1 for the first voice)')
+    }
+    if (viewOnceList.length > 0) {
+      hints.push('Reply *+YesViewN* to receive view-once item N.')
+      hints.push('(Example: +YesView1 for the first view-once item)')
+    }
+  }
+  if (hints.length > 0) body += '\n\n' + hints.join('\n')
+
+  const chunks = chunkText(body)
+  for (let i = 0; i < chunks.length; i++) {
+    await sock.sendMessage(jid, { text: chunks[i] }, i === 0 ? { quoted: m } : {})
+    if (i < chunks.length - 1) await sleep(500)
+  }
+
+  pendingVoiceBatch = { voiceList, viewOnceList, chatJid: jid, createdAt: Date.now() }
+  console.log(`[cmd] +ShowNow — served ${all.length} messages, ${voiceList.length} voices, ${viewOnceList.length} view-once`)
+}
+
+// ─── +YesVoice<N> ───────────────────────────────────────────────────────
+async function cmdYesVoice(sock, m, cmdRaw) {
+  const jid = m.key.remoteJid
+  const match = /^\+yesvoice(\d+)$/i.exec(cmdRaw)
+  if (!match) {
+    await sock.sendMessage(jid, { text: 'Usage: YesVoice<N> (e.g. YesVoice1).' }, { quoted: m })
+    return
+  }
+  const N = parseInt(match[1], 10)
+
+  if (pendingVoiceBatch === null || pendingVoiceBatch.chatJid !== jid) {
+    await sock.sendMessage(jid, { text: 'Send ShowNow first to load the voice list.' }, { quoted: m })
+    return
+  }
+  if (Date.now() - pendingVoiceBatch.createdAt > BATCH_TTL_MS) {
+    await sock.sendMessage(jid, { text: 'Voice list expired. Send ShowNow again to refresh.' }, { quoted: m })
+    return
+  }
+
+  const M = pendingVoiceBatch.voiceList.length
+  if (M === 0) {
+    await sock.sendMessage(jid, { text: 'No voice notes in the last ShowNow result.' }, { quoted: m })
+    return
+  }
+  if (N < 1 || N > M) {
+    await sock.sendMessage(jid, { text: `No voice note #${N}. You have ${M} voices — try YesVoice1 to YesVoice${M}.` }, { quoted: m })
+    return
+  }
+
+  const v = pendingVoiceBatch.voiceList[N - 1]
+  const record = await store.getMessageById(v.id)
+  if (!record || !record.media_path || !fs.existsSync(record.media_path)) {
+    await sock.sendMessage(jid, { text: `Voice note #${N} file is missing from disk.` }, { quoted: m })
+    return
+  }
+
+  await sock.sendMessage(
+    jid,
+    { audio: { url: record.media_path }, mimetype: 'audio/ogg; codecs=opus', ptt: true },
+    { quoted: m }
+  )
+  await sock.sendMessage(jid, {
+    text: `🎤 Voice #${N} from ${record.sender_name} • ${formatTime(record.timestamp)}`,
+  })
+  console.log(`[cmd] +YesVoice${N} — sent voice #${N}`)
+}
+
+// ─── +YesView<N> ────────────────────────────────────────────────────────
+async function cmdYesView(sock, m, cmdRaw) {
+  const jid = m.key.remoteJid
+  const match = cmdRaw.match(/^\+yesview(\d+)$/i)
+  if (!match) {
+    await sock.sendMessage(jid, { text: 'Usage: YesView<N> (e.g. YesView1).' }, { quoted: m })
+    return
+  }
+  const N = parseInt(match[1], 10)
+
+  if (!pendingVoiceBatch || pendingVoiceBatch.chatJid !== jid) {
+    await sock.sendMessage(jid, { text: 'Send ShowNow first to load the view-once list.' }, { quoted: m })
+    return
+  }
+  if (Date.now() - pendingVoiceBatch.createdAt > BATCH_TTL_MS) {
+    await sock.sendMessage(jid, { text: 'View-once list expired. Send ShowNow again to refresh.' }, { quoted: m })
+    return
+  }
+
+  const list = pendingVoiceBatch.viewOnceList || []
+  const M = list.length
+  if (M === 0) {
+    await sock.sendMessage(jid, { text: 'No view-once items in the last ShowNow result.' }, { quoted: m })
+    return
+  }
+  if (N < 1 || N > M) {
+    await sock.sendMessage(jid, { text: `No view-once item #${N}. You have ${M} — try YesView1 to YesView${M}.` }, { quoted: m })
+    return
+  }
+
+  const v = list[N - 1]
+  const record = await store.getMessageById(v.id)
+  if (!record || !record.media_path || !fs.existsSync(record.media_path)) {
+    await sock.sendMessage(jid, { text: `View-once item #${N} file is missing from disk.` }, { quoted: m })
+    return
+  }
+
+  const ext = (record.media_path.split('.').pop() || '').toLowerCase()
+  const captionBase = `View #${N} (${record.content}) from ${record.sender_name} • ${formatDisplayTime(record.timestamp)}`
+
+  if (ext === 'jpg' || ext === 'jpeg') {
+    await sock.sendMessage(jid, { image: { url: record.media_path }, caption: `📷 ${captionBase}` }, { quoted: m })
+  } else if (ext === 'mp4') {
+    await sock.sendMessage(jid, { video: { url: record.media_path }, caption: `🎥 ${captionBase}` }, { quoted: m })
+  } else if (ext === 'ogg') {
+    await sock.sendMessage(jid, { audio: { url: record.media_path }, mimetype: 'audio/ogg; codecs=opus', ptt: true }, { quoted: m })
+    await sock.sendMessage(jid, { text: `🎤 ${captionBase}` })
+  } else if (ext === 'webp') {
+    await sock.sendMessage(jid, { sticker: { url: record.media_path } }, { quoted: m })
+    await sock.sendMessage(jid, { text: `🎨 ${captionBase}` })
+  } else {
+    await sock.sendMessage(jid, { document: { url: record.media_path }, fileName: `viewonce-${N}.${ext}`, mimetype: 'application/octet-stream', caption: captionBase }, { quoted: m })
+  }
+  console.log(`[cmd] +YesView${N} — sent view-once item #${N} (${ext})`)
+}
+
+// ─── +DeleteAllChat ─────────────────────────────────────────────────────
+// Two-step: first call shows row count and asks for confirmation, second
+// call within 60s (with arg "confirm") wipes the messages table.
+async function cmdDeleteAllChat(sock, m, args) {
+  const jid = m.key.remoteJid
+
+  if (args[0] !== 'confirm') {
+    const s = await store.stats()
+    pendingConfirm = { command: 'deleteallchat', chatJid: jid, createdAt: Date.now() }
+    await sock.sendMessage(
+      jid,
+      {
+        text:
+          `⚠️  This will permanently delete ALL ${s.total} message records (text, voice metadata, view-once placeholders).\n` +
+          `Voice files on disk and auth state are NOT touched.\n\n` +
+          `Reply "DeleteAllChat confirm" within 60 seconds to proceed.`,
+      },
+      { quoted: m }
+    )
+    return
+  }
+
+  if (!pendingConfirm || pendingConfirm.command !== 'deleteallchat' || pendingConfirm.chatJid !== jid) {
+    await sock.sendMessage(jid, { text: 'No pending DeleteAllChat to confirm. Send DeleteAllChat first.' }, { quoted: m })
+    return
+  }
+  if (Date.now() - pendingConfirm.createdAt > CONFIRM_TTL_MS) {
+    pendingConfirm = null
+    await sock.sendMessage(jid, { text: 'Confirmation expired. Send DeleteAllChat again.' }, { quoted: m })
+    return
+  }
+  pendingConfirm = null
+
+  const s = await store.stats()
+  const removed = await store.wipeAll()
+  await sock.sendMessage(
+    jid,
+    { text: `🗑️  Deleted ${removed} message records (was ${s.total}). Auth and voice files untouched.` },
+    { quoted: m }
+  )
+  console.log(`[cmd] +DeleteAllChat — wiped ${removed} rows`)
+}
+
+// ─── +DeleteAllVoice ────────────────────────────────────────────────────
+// Deletes every .ogg under ./media/voice/ and nulls media_path on voice
+// rows in the DB. Message records stay so the timeline shows "file removed".
+async function cmdDeleteAllVoice(sock, m, args) {
+  const jid = m.key.remoteJid
+  const dir = './media/voice'
+
+  // Count files for the confirmation prompt
+  let fileCount = 0
+  if (fs.existsSync(dir)) fileCount = fs.readdirSync(dir).filter((f) => f.endsWith('.ogg')).length
+
+  if (args[0] !== 'confirm') {
+    pendingConfirm = { command: 'deleteallvoice', chatJid: jid, createdAt: Date.now() }
+    await sock.sendMessage(
+      jid,
+      {
+        text:
+          `⚠️  This will permanently delete ${fileCount} voice file(s) from disk.\n` +
+          `Message records stay (they show as "Voice note (file removed)"), but audio can't be replayed.\n\n` +
+          `Reply "DeleteAllVoice confirm" within 60 seconds to proceed.`,
+      },
+      { quoted: m }
+    )
+    return
+  }
+
+  if (!pendingConfirm || pendingConfirm.command !== 'deleteallvoice' || pendingConfirm.chatJid !== jid) {
+    await sock.sendMessage(jid, { text: 'No pending DeleteAllVoice to confirm. Send DeleteAllVoice first.' }, { quoted: m })
+    return
+  }
+  if (Date.now() - pendingConfirm.createdAt > CONFIRM_TTL_MS) {
+    pendingConfirm = null
+    await sock.sendMessage(jid, { text: 'Confirmation expired. Send DeleteAllVoice again.' }, { quoted: m })
+    return
+  }
+  pendingConfirm = null
+
+  let deleted = 0
+  let failed = 0
+  if (fs.existsSync(dir)) {
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.ogg')) continue
+      try {
+        fs.unlinkSync(`${dir}/${f}`)
+        deleted++
+      } catch (e) {
+        failed++
+        console.log(`[cmd] +DeleteAllVoice: could not delete ${f}: ${e.message}`)
+      }
+    }
+  }
+
+  // Detach media_path on voice rows so +YesVoiceN doesn't try to open a
+  // missing file.
+  try {
+    const all = await store.getAll()
+    for (const r of all) {
+      if (r.type === 'voice' && r.media_path) {
+        await store.saveMessage({ ...r, media_path: null, content: 'Voice note (file removed)' })
+      }
+    }
+  } catch (e) {
+    console.log('[cmd] +DeleteAllVoice: DB cleanup warning:', e.message)
+  }
+
+  await sock.sendMessage(
+    jid,
+    { text: `🎤 Deleted ${deleted} voice file(s)${failed ? `, ${failed} failed` : ''}. Message records kept.` },
+    { quoted: m }
+  )
+  console.log(`[cmd] +DeleteAllVoice — deleted ${deleted} files, ${failed} failed`)
+}
+
+// ─── dispatcher ─────────────────────────────────────────────────────────
+export async function handleCommand(sock, m, text) {
+  try {
+    const tokens = text.trim().split(/\s+/)
+    const cmdRaw = tokens[0]
+    const args = tokens.slice(1)
+    const cmd = cmdRaw.toLowerCase()
+
+    if (cmd === '+shownow') {
+      await cmdShowNow(sock, m)
+    } else if (cmd.startsWith('+yesvoice')) {
+      await cmdYesVoice(sock, m, cmdRaw)
+    } else if (cmd.startsWith('+yesview')) {
+      await cmdYesView(sock, m, cmdRaw)
+    } else if (cmd === '+deleteallchat') {
+      await cmdDeleteAllChat(sock, m, args)
+    } else if (cmd === '+deleteallvoice') {
+      await cmdDeleteAllVoice(sock, m, args)
+    } else {
+      await sock.sendMessage(m.key.remoteJid, {
+        text: 'Supported: ShowNow, YesVoice<N>, YesView<N>, DeleteAllChat, DeleteAllVoice.',
+      })
+    }
+  } catch (e) {
+    console.log(`[cmd] error: ${e?.message || e}`)
+    try {
+      await sock.sendMessage(m.key.remoteJid, { text: `Command failed: ${e.message}` })
+    } catch (sendErr) {
+      console.log(`[cmd] could not send error reply: ${sendErr?.message || sendErr}`)
+    }
+  }
+}
