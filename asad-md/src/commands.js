@@ -31,28 +31,28 @@ function pad(n) {
   return String(n).padStart(2, '0')
 }
 
-function formatTime(ms) {
-  const d = new Date(Number(ms))
-  if (Number.isNaN(d.getTime())) return 'unknown time'
-  return (
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  )
-}
+// Pakistan Standard Time (GMT+5, no DST). Done with fixed-offset UTC math so
+// it is correct no matter what timezone the server (Render = UTC) runs in.
+const PKT_OFFSET_MS = 5 * 60 * 60 * 1000
 
 function h12(n) {
   return n % 12 === 0 ? 12 : n % 12
 }
 
-function formatDisplayTime(ms) {
-  const d = new Date(Number(ms))
+// "06/11/2026 03:21 AM"
+function formatPkt(ms) {
+  const d = new Date(Number(ms) + PKT_OFFSET_MS)
   if (Number.isNaN(d.getTime())) return 'unknown time'
-  const h24 = d.getHours()
-  const hour12 = h12(h24)
+  const h24 = d.getUTCHours()
   const meridiem = h24 < 12 ? 'AM' : 'PM'
-  const minutes = String(d.getMinutes()).padStart(2, '0')
-  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()} ${hour12}:${minutes}${meridiem}`
+  return (
+    `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ` +
+    `${pad(h12(h24))}:${pad(d.getUTCMinutes())} ${meridiem}`
+  )
 }
+
+const formatTime = formatPkt
+const formatDisplayTime = formatPkt
 
 function chunkText(text, maxChars = 60000) {
   const PREFIX = '*(continued)*\n'
