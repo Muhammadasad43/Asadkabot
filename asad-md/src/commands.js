@@ -6,6 +6,8 @@
 //   +ShowNow                  — dump the archive grouped by sender
 //   +YesVoice<N>              — send voice note N from the last +ShowNow
 //   +YesView<N>               — send view-once item N from the last +ShowNow
+//   +Schedule <num> "msg" [time] — schedule a message (see schedule.js)
+//   +Schedules / +Unschedule <N>  — list / cancel scheduled messages
 //   +DeleteAllChat            — confirms then wipes the messages table
 //   +DeleteAllChat confirm    — actually wipes
 //   +DeleteAllVoice           — confirms then deletes voice files on disk
@@ -17,6 +19,7 @@
 
 import fs from 'node:fs'
 import { store } from './store.js'
+import { cmdSchedule, cmdSchedules, cmdUnschedule } from './schedule.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
 let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteAll*
@@ -477,13 +480,19 @@ export async function handleCommand(sock, m, text) {
       await cmdYesVoice(sock, m, cmdRaw)
     } else if (cmd.startsWith('+yesview')) {
       await cmdYesView(sock, m, cmdRaw)
+    } else if (cmd === '+schedule') {
+      await cmdSchedule(sock, m, text)
+    } else if (cmd === '+schedules') {
+      await cmdSchedules(sock, m)
+    } else if (cmd === '+unschedule') {
+      await cmdUnschedule(sock, m, args)
     } else if (cmd === '+deleteallchat') {
       await cmdDeleteAllChat(sock, m, args)
     } else if (cmd === '+deleteallvoice') {
       await cmdDeleteAllVoice(sock, m, args)
     } else {
       await sock.sendMessage(m.key.remoteJid, {
-        text: 'Supported: ShowNow, YesVoice<N>, YesView<N>, DeleteAllChat, DeleteAllVoice.',
+        text: 'Supported: ShowNow, YesVoice<N>, YesView<N>, Schedule, Schedules, Unschedule<N>, DeleteAllChat, DeleteAllVoice.',
       })
     }
   } catch (e) {

@@ -204,4 +204,5 @@ export const store = {
   },
 }
 
+export { pool }
 export default store

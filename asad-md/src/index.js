@@ -10,6 +10,7 @@
 //   PORT           optional — health endpoint port (defaults to 10000)
 
 import fs from 'node:fs';
+import { startScheduler, setSchedulerOnline } from './schedule.js';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -255,6 +256,8 @@ function startHealthServer() {
 
 // ---------- main ----------
 
+let currentSock = null;
+
 async function start() {
   const { state, saveCreds } = await useCachedPgAuthState();
 
@@ -317,6 +320,8 @@ async function start() {
     }
 
     if (connection === 'open') {
+      currentSock = sock;
+      setSchedulerOnline(true);
       reconnectAttempts = 0;
       const ownJid = jidNormalizedUser(sock.user.id);
       console.log(`[Asad MD] Logged in as ${ownJid}${sock.user.lid ? ` (LID: ${jidNormalizedUser(sock.user.lid)})` : ''}`);
@@ -324,6 +329,7 @@ async function start() {
     }
 
     if (connection === 'close') {
+      setSchedulerOnline(false);
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       console.log('[Asad MD] close reason:', lastDisconnect?.error?.message);
 
@@ -381,6 +387,7 @@ process.on('unhandledRejection', (e) => {
 });
 
 startHealthServer();
+startScheduler(() => currentSock);
 start().catch((e) => {
   console.error('[Asad MD] Fatal error while starting:', e);
   process.exit(1);
