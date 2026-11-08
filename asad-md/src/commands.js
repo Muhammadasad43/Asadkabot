@@ -7,7 +7,8 @@
 //   +YesVoice<N>              — send voice note N from the last +ShowNow
 //   +YesView<N>               — send view-once item N from the last +ShowNow
 //   +Schedule <num> "msg" [time] — schedule a message (see schedule.js)
-//   +Schedules / +Unschedule <N>  — list / cancel scheduled messages
+//   +ScheduleList / +Unschedule <N> — list / cancel scheduled messages
+//   +Help                     — command list; "+<Command> help" for details
 //   +DeleteAllChat            — confirms then wipes the messages table
 //   +DeleteAllChat confirm    — actually wipes
 //   +DeleteAllVoice           — confirms then deletes voice files on disk
@@ -19,7 +20,8 @@
 
 import fs from 'node:fs'
 import { store } from './store.js'
-import { cmdSchedule, cmdSchedules, cmdUnschedule } from './schedule.js'
+import { cmdSchedule, cmdScheduleList, cmdUnschedule } from './schedule.js'
+import { welcomeText, helpFor, commandKey, HELP_TOKENS } from './help.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
 let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteAll*
@@ -29,7 +31,6 @@ const CONFIRM_TTL_MS = 60 * 1000
 const SEPARATOR = '────────────────────────'
 // Short centered divider between different people's messages
 const CENTER_LINE = '                    ──────────'
-const HINT_BAR = '<><><><><><><><><><><><><><><><>'
 
 // ─── helpers ────────────────────────────────────────────────────────────
 function pad(n) {
@@ -223,20 +224,6 @@ async function cmdShowNow(sock, m) {
     body += '\n\n' + trailing.join('\n\n' + SEPARATOR + '\n\n')
   }
 
-  const hints = []
-  if (voiceList.length > 0 || viewOnceList.length > 0) {
-    hints.push(HINT_BAR)
-    if (voiceList.length > 0) {
-      hints.push('Reply *+YesVoiceN* to receive voice note N.')
-      hints.push('(Example: +YesVoice1 for the first voice)')
-    }
-    if (viewOnceList.length > 0) {
-      hints.push('Reply *+YesViewN* to receive view-once item N.')
-      hints.push('(Example: +YesView1 for the first view-once item)')
-    }
-  }
-  if (hints.length > 0) body += '\n\n' + hints.join('\n')
-
   const chunks = chunkText(body)
   for (let i = 0; i < chunks.length; i++) {
     await sock.sendMessage(jid, { text: chunks[i] }, i === 0 ? { quoted: m } : {})
@@ -252,7 +239,7 @@ async function cmdYesVoice(sock, m, cmdRaw) {
   const jid = m.key.remoteJid
   const match = /^\+yesvoice(\d+)$/i.exec(cmdRaw)
   if (!match) {
-    await sock.sendMessage(jid, { text: 'Usage: YesVoice<N> (e.g. YesVoice1).' }, { quoted: m })
+    await sock.sendMessage(jid, { text: 'Give a voice number. Send *+YesVoice help* for instructions.' }, { quoted: m })
     return
   }
   const N = parseInt(match[1], 10)
@@ -299,7 +286,7 @@ async function cmdYesView(sock, m, cmdRaw) {
   const jid = m.key.remoteJid
   const match = cmdRaw.match(/^\+yesview(\d+)$/i)
   if (!match) {
-    await sock.sendMessage(jid, { text: 'Usage: YesView<N> (e.g. YesView1).' }, { quoted: m })
+    await sock.sendMessage(jid, { text: 'Give a view-once number. Send *+YesView help* for instructions.' }, { quoted: m })
     return
   }
   const N = parseInt(match[1], 10)
@@ -356,7 +343,7 @@ async function cmdYesView(sock, m, cmdRaw) {
 async function cmdDeleteAllChat(sock, m, args) {
   const jid = m.key.remoteJid
 
-  if (args[0] !== 'confirm') {
+  if ((args[0] || '').toLowerCase() !== 'confirm') {
     const s = await store.stats()
     pendingConfirm = { command: 'deleteallchat', chatJid: jid, createdAt: Date.now() }
     await sock.sendMessage(
@@ -404,7 +391,7 @@ async function cmdDeleteAllVoice(sock, m, args) {
   let fileCount = 0
   if (fs.existsSync(dir)) fileCount = fs.readdirSync(dir).filter((f) => f.endsWith('.ogg')).length
 
-  if (args[0] !== 'confirm') {
+  if ((args[0] || '').toLowerCase() !== 'confirm') {
     pendingConfirm = { command: 'deleteallvoice', chatJid: jid, createdAt: Date.now() }
     await sock.sendMessage(
       jid,
@@ -472,7 +459,25 @@ export async function handleCommand(sock, m, text) {
     const tokens = text.trim().split(/\s+/)
     const cmdRaw = tokens[0]
     const args = tokens.slice(1)
-    const cmd = cmdRaw.toLowerCase()
+    const cmd = cmdRaw.toLowerCase() // commands are never case-sensitive
+    const key = commandKey(cmd)
+    const jid = m.key.remoteJid
+
+    // +Help  /  +Help <command>
+    if (cmd === '+help') {
+      const target = helpFor(commandKey(args[0] || ''))
+      await sock.sendMessage(jid, { text: target || welcomeText() }, { quoted: m })
+      return
+    }
+
+    // +<Command> help  (also -help, --help, -h, ?)
+    if (args.length > 0 && HELP_TOKENS.has(args[0].toLowerCase())) {
+      const h = helpFor(key)
+      if (h) {
+        await sock.sendMessage(jid, { text: h }, { quoted: m })
+        return
+      }
+    }
 
     if (cmd === '+shownow') {
       await cmdShowNow(sock, m)
@@ -482,8 +487,8 @@ export async function handleCommand(sock, m, text) {
       await cmdYesView(sock, m, cmdRaw)
     } else if (cmd === '+schedule') {
       await cmdSchedule(sock, m, text)
-    } else if (cmd === '+schedules') {
-      await cmdSchedules(sock, m)
+    } else if (cmd === '+schedulelist') {
+      await cmdScheduleList(sock, m)
     } else if (cmd === '+unschedule') {
       await cmdUnschedule(sock, m, args)
     } else if (cmd === '+deleteallchat') {
@@ -491,9 +496,7 @@ export async function handleCommand(sock, m, text) {
     } else if (cmd === '+deleteallvoice') {
       await cmdDeleteAllVoice(sock, m, args)
     } else {
-      await sock.sendMessage(m.key.remoteJid, {
-        text: 'Supported: ShowNow, YesVoice<N>, YesView<N>, Schedule, Schedules, Unschedule<N>, DeleteAllChat, DeleteAllVoice.',
-      })
+      await sock.sendMessage(jid, { text: 'Unknown command. Send *+Help* to see all commands.' })
     }
   } catch (e) {
     console.log(`[cmd] error: ${e?.message || e}`)

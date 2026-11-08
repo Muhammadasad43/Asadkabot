@@ -10,9 +10,6 @@
 import { pool } from './store.js'
 
 const PKT_OFFSET_MS = 5 * 60 * 60 * 1000
-const TICK_MS = 15 * 1000
-const MAX_LATE_MS = 24 * 60 * 60 * 1000
-const MAX_ATTEMPTS = 3
 
 const pad = (n) => String(n).padStart(2, '0')
 
@@ -109,6 +106,7 @@ export function parseWhen(input, nowMs = Date.now()) {
   // ── date
   const dateStr = tokens.join(' ').replace(/[-\/.]/g, ' ').trim()
   const parts = dateStr ? dateStr.split(/\s+/) : []
+  const dateGiven = parts.length > 0
   const words = parts.filter((p) => /^[a-z]+$/i.test(p))
   const nums = parts.filter((p) => /^\d+$/.test(p))
   if (words.length + nums.length !== parts.length) {
@@ -162,8 +160,19 @@ export function parseWhen(input, nowMs = Date.now()) {
     return { error: `${pad(day)}/${pad(month)}/${year} is not a valid date.` }
   }
 
-  const ms = Date.UTC(year, month - 1, day, hour24, minute) - PKT_OFFSET_MS
-  return { ms, assumedMeridiem }
+  let ms = Date.UTC(year, month - 1, day, hour24, minute) - PKT_OFFSET_MS
+
+  // No date given and that time has already passed today: move it to tomorrow.
+  // If AM/PM was not given, tomorrow's AM is used (e.g. "[1:47]" at 1:58 PM
+  // becomes 1:47 AM tomorrow).
+  let shifted = false
+  if (ms <= nowMs && !dateGiven) {
+    const t = pktParts(nowMs + 24 * 60 * 60 * 1000)
+    const h = assumedMeridiem ? hour % 12 : hour24
+    ms = Date.UTC(t.y, t.mo - 1, t.d, h, minute) - PKT_OFFSET_MS
+    shifted = true
+  }
+  return { ms, assumedMeridiem, shifted }
 }
 
 // ─── full command parsing ─────────────────────────────────────────────
@@ -201,7 +210,7 @@ export function parseScheduleCommand(text, nowMs = Date.now()) {
       error: `That time (${formatPkt(when.ms)}) has already passed. Now it is ${formatPkt(nowMs)} (GMT+5).`,
     }
   }
-  return { digits, message, sendAt: when.ms, assumedMeridiem: when.assumedMeridiem }
+  return { digits, message, sendAt: when.ms, shifted: when.shifted }
 }
 
 // ─── database ─────────────────────────────────────────────────────────
@@ -228,18 +237,13 @@ async function ensureSchema() {
 }
 
 // ─── commands ─────────────────────────────────────────────────────────
-const USAGE =
-  '⚠️ Usage:\n' +
-  'Schedule 03048648492 "Your message" [5:30PM 3-Nov]\n\n' +
-  '• Number: 0304… or 3048… = Pakistan (+92); other countries: +<code><number>\n' +
-  '• Message in "quotes", time in [brackets] (GMT+5)\n' +
-  '• Missing AM/PM, day, month or year = taken from now'
+const HELP_HINT = 'Send *+Schedule help* for instructions.'
 
 export async function cmdSchedule(sock, m, text) {
   const jid = m.key.remoteJid
   const p = parseScheduleCommand(text)
   if (p.error) {
-    await sock.sendMessage(jid, { text: `⚠️ ${p.error}\n\n${USAGE}` }, { quoted: m })
+    await sock.sendMessage(jid, { text: `⚠️ ${p.error}\n${HELP_HINT}` }, { quoted: m })
     return
   }
 
@@ -271,17 +275,15 @@ export async function cmdSchedule(sock, m, text) {
       text:
         `✅ Message scheduled (#${id})\n` +
         `To: +${p.digits}\n` +
-        `When: ${formatPkt(p.sendAt)} (GMT+5)` +
-        (p.assumedMeridiem ? '\n(AM/PM taken from the current time)' : '') +
-        `\nMessage: "${preview}"\n\n` +
-        `Cancel with: Unschedule ${id}`,
+        `When: ${formatPkt(p.sendAt)} (GMT+5)\n` +
+        `Message: "${preview}"`,
     },
     { quoted: m }
   )
-  console.log(`[schedule] #${id} → +${p.digits} at ${formatPkt(p.sendAt)}`)
+  console.log(`[schedule] #${id} → +${p.digits} at ${formatPkt(p.sendAt)}${p.shifted ? ' (moved to tomorrow)' : ''}`)
 }
 
-export async function cmdSchedules(sock, m) {
+export async function cmdScheduleList(sock, m) {
   const jid = m.key.remoteJid
   await ensureSchema()
   const r = await pool.query(
@@ -298,7 +300,7 @@ export async function cmdSchedules(sock, m) {
   })
   await sock.sendMessage(
     jid,
-    { text: `*⏰ PENDING (${r.rows.length}):*\n\n${lines.join('\n\n')}\n\nCancel: Unschedule <number>` },
+    { text: `*⏰ PENDING (${r.rows.length}):*\n\n${lines.join('\n\n')}` },
     { quoted: m }
   )
 }
@@ -307,7 +309,7 @@ export async function cmdUnschedule(sock, m, args) {
   const jid = m.key.remoteJid
   const id = Number(String(args[0] || '').replace(/^#/, ''))
   if (!Number.isInteger(id) || id <= 0) {
-    await sock.sendMessage(jid, { text: '⚠️ Usage: Unschedule <number>  (see Schedules for numbers)' }, { quoted: m })
+    await sock.sendMessage(jid, { text: '⚠️ Give the schedule number. Send *+Unschedule help* for instructions.' }, { quoted: m })
     return
   }
   await ensureSchema()
@@ -323,9 +325,16 @@ export async function cmdUnschedule(sock, m, args) {
 }
 
 // ─── background sender ────────────────────────────────────────────────
+// WhatsApp delivery takes a few seconds, so each message is sent LEAD_MS
+// before its scheduled time so that it ARRIVES on the dot.
+const envLead = process.env.ASADMD_SCHEDULE_LEAD_MS
+const LEAD_MS = envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : 5000
+const TICK_MS = 5 * 1000
+const LOOKAHEAD_MS = 20 * 1000
+
 let online = false
-let ticking = false
 let timer = null
+const armed = new Set() // schedule ids with a send timer already set
 
 export function setSchedulerOnline(v) {
   online = Boolean(v)
@@ -339,63 +348,77 @@ async function notify(sock, row, text) {
   }
 }
 
-async function tick(getSock) {
-  if (!online || ticking) return
+async function fire(getSock, row) {
+  armed.delete(row.id)
   const sock = getSock()
-  if (!sock) return
-  ticking = true
+  if (!online || !sock) return // not connected: the next tick re-arms it
+
+  // claim it (a cancelled schedule is no longer 'pending', so it is skipped)
+  const claim = await pool.query(
+    `UPDATE asadmd_schedules SET status = 'sending' WHERE id = $1 AND status = 'pending' RETURNING id`,
+    [row.id]
+  )
+  if (!claim.rowCount) return
+
+  const lateBy = Date.now() - Number(row.send_at)
+  if (lateBy > 24 * 60 * 60 * 1000) {
+    await pool.query(`UPDATE asadmd_schedules SET status = 'missed' WHERE id = $1`, [row.id])
+    await notify(sock, row, `⚠️ Scheduled message #${row.id} to +${row.phone} was not sent (the bot was offline for over 24 hours past ${formatPkt(Number(row.send_at))}).`)
+    return
+  }
+
+  try {
+    await sock.sendMessage(row.jid, { text: row.message })
+    await pool.query(
+      `UPDATE asadmd_schedules SET status = 'sent', sent_at = $2 WHERE id = $1`,
+      [row.id, Date.now()]
+    )
+    console.log(`[schedule] #${row.id} sent to +${row.phone}`)
+    await notify(
+      sock,
+      row,
+      `📤 Scheduled message #${row.id} sent to +${row.phone}` +
+        (lateBy > 2 * 60 * 1000 ? ' (late: the bot was offline)' : '')
+    )
+  } catch (e) {
+    const attempts = row.attempts + 1
+    const failed = attempts >= 3
+    await pool.query(
+      `UPDATE asadmd_schedules SET status = $2, attempts = $3, error = $4 WHERE id = $1`,
+      [row.id, failed ? 'failed' : 'pending', attempts, String(e?.message || e).slice(0, 300)]
+    )
+    console.log(`[schedule] #${row.id} send error (${attempts}/3): ${e?.message || e}`)
+    if (failed) {
+      await notify(sock, row, `❌ Scheduled message #${row.id} to +${row.phone} failed: ${e?.message || e}`)
+    }
+  }
+}
+
+async function tick(getSock) {
+  if (!online) return
   try {
     await ensureSchema()
+    const now = Date.now()
     const due = await pool.query(
       `SELECT * FROM asadmd_schedules
-       WHERE status = 'pending' AND send_at <= $1 ORDER BY send_at ASC LIMIT 20`,
-      [Date.now()]
+       WHERE status = 'pending' AND send_at <= $1 ORDER BY send_at ASC LIMIT 50`,
+      [now + LOOKAHEAD_MS]
     )
+    let overdueSlot = 0
     for (const row of due.rows) {
-      const claim = await pool.query(
-        `UPDATE asadmd_schedules SET status = 'sending' WHERE id = $1 AND status = 'pending' RETURNING id`,
-        [row.id]
-      )
-      if (!claim.rowCount) continue
-
-      const lateBy = Date.now() - Number(row.send_at)
-      if (lateBy > MAX_LATE_MS) {
-        await pool.query(`UPDATE asadmd_schedules SET status = 'missed' WHERE id = $1`, [row.id])
-        await notify(sock, row, `⚠️ Scheduled message #${row.id} to +${row.phone} was not sent (the bot was offline for over 24 hours past ${formatPkt(Number(row.send_at))}).`)
-        continue
+      if (armed.has(row.id)) continue
+      armed.add(row.id)
+      let wait = Number(row.send_at) - LEAD_MS - now
+      if (wait <= 0) {
+        wait = overdueSlot * 1500 // already due: send now, staggered
+        overdueSlot += 1
       }
-
-      try {
-        await sock.sendMessage(row.jid, { text: row.message })
-        await pool.query(
-          `UPDATE asadmd_schedules SET status = 'sent', sent_at = $2 WHERE id = $1`,
-          [row.id, Date.now()]
-        )
-        console.log(`[schedule] #${row.id} sent to +${row.phone}`)
-        await notify(
-          sock,
-          row,
-          `📤 Scheduled message #${row.id} sent to +${row.phone}` +
-            (lateBy > 2 * 60 * 1000 ? ` (late: bot was offline)` : '')
-        )
-      } catch (e) {
-        const attempts = row.attempts + 1
-        const failed = attempts >= MAX_ATTEMPTS
-        await pool.query(
-          `UPDATE asadmd_schedules SET status = $2, attempts = $3, error = $4 WHERE id = $1`,
-          [row.id, failed ? 'failed' : 'pending', attempts, String(e?.message || e).slice(0, 300)]
-        )
-        console.log(`[schedule] #${row.id} send error (${attempts}/${MAX_ATTEMPTS}): ${e?.message || e}`)
-        if (failed) {
-          await notify(sock, row, `❌ Scheduled message #${row.id} to +${row.phone} failed: ${e?.message || e}`)
-        }
-      }
-      await new Promise((r) => setTimeout(r, 1500))
+      setTimeout(() => {
+        fire(getSock, row).catch((e) => console.log(`[schedule] fire error: ${e?.message || e}`))
+      }, wait)
     }
   } catch (e) {
     console.log(`[schedule] tick error: ${e?.message || e}`)
-  } finally {
-    ticking = false
   }
 }
 
@@ -408,5 +431,5 @@ export function startScheduler(getSock) {
     )
     .catch((e) => console.log(`[schedule] init error: ${e?.message || e}`))
   timer = setInterval(() => tick(getSock), TICK_MS)
-  console.log('[schedule] scheduler started')
+  console.log(`[schedule] scheduler started (sends ${LEAD_MS} ms early)`)
 }
