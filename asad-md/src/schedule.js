@@ -328,7 +328,7 @@ export async function cmdUnschedule(sock, m, args) {
 // WhatsApp delivery takes a few seconds, so each message is sent LEAD_MS
 // before its scheduled time so that it ARRIVES on the dot.
 const envLead = process.env.ASADMD_SCHEDULE_LEAD_MS
-const LEAD_MS = envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : 5000
+const LEAD_MS = envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : 3500
 const TICK_MS = 5 * 1000
 const LOOKAHEAD_MS = 20 * 1000
 
