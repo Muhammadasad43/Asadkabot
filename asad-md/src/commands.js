@@ -7,6 +7,7 @@
 //   +YesVoice<N>              — send voice note N from the last +ShowNow
 //   +YesView<N>               — send view-once item N from the last +ShowNow
 //   +Schedule <num> "msg" [time] — schedule a message (see schedule.js)
+//   +Schedule early=<ms> / delay=<ms> — send scheduled messages early/late
 //   +ScheduleList / +Unschedule <N> — list / cancel scheduled messages
 //   +Help                     — command list; "+<Command> help" for details
 //   +DeleteAllChat            — confirms then wipes the messages table
@@ -20,7 +21,7 @@
 
 import fs from 'node:fs'
 import { store } from './store.js'
-import { cmdSchedule, cmdScheduleList, cmdUnschedule } from './schedule.js'
+import { cmdSchedule, cmdScheduleList, cmdUnschedule, getTimingLabel } from './schedule.js'
 import { welcomeText, helpFor, commandKey, HELP_TOKENS } from './help.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
@@ -465,14 +466,17 @@ export async function handleCommand(sock, m, text) {
 
     // +Help  /  +Help <command>
     if (cmd === '+help') {
-      const target = helpFor(commandKey(args[0] || ''))
+      const k = commandKey(args[0] || '')
+      let target = helpFor(k)
+      if (target && k === 'schedule') target += `\n\n*Current timing:* ${getTimingLabel()}`
       await sock.sendMessage(jid, { text: target || welcomeText() }, { quoted: m })
       return
     }
 
     // +<Command> help  (also -help, --help, -h, ?)
     if (args.length > 0 && HELP_TOKENS.has(args[0].toLowerCase())) {
-      const h = helpFor(key)
+      let h = helpFor(key)
+      if (h && key === 'schedule') h += `\n\n*Current timing:* ${getTimingLabel()}`
       if (h) {
         await sock.sendMessage(jid, { text: h }, { quoted: m })
         return

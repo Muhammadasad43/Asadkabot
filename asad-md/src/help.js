@@ -53,6 +53,9 @@ export const COMMANDS = {
       '*Number:* 0304… or 3048… = Pakistan (+92). Other countries: +<country code><number>\n' +
       '*Message:* inside "quotes"\n' +
       '*Time:* inside [brackets], any date style (3-Nov, 3-11-2026, 3/11/2026, Nov 3, tomorrow)\n\n' +
+      '*Timing:* messages are sent a little early so they arrive on the dot. Adjust it with:\n' +
+      '```+Schedule early=3000``` sends 3000 ms early\n' +
+      '```+Schedule delay=3000``` sends 3000 ms late\n\n' +
       '*Examples:*\n' +
       '```+Schedule 03048648492 "Good morning" [7:30AM]```\n' +
       '```+Schedule +14155550123 "Happy birthday!" [12:00AM 3-Nov]```\n' +

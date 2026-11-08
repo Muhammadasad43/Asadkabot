@@ -236,11 +236,75 @@ async function ensureSchema() {
   schemaReady = true
 }
 
+// ─── timing setting (saved in Postgres, survives restarts) ────────────
+async function ensureSettings() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS asadmd_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `)
+}
+
+async function loadLead() {
+  await ensureSettings()
+  const r = await pool.query(`SELECT value FROM asadmd_settings WHERE key = 'schedule_lead_ms'`)
+  if (r.rows[0]) {
+    const v = Number(r.rows[0].value)
+    if (Number.isFinite(v)) leadMs = v
+  }
+}
+
+async function saveLead(v) {
+  await ensureSettings()
+  await pool.query(
+    `INSERT INTO asadmd_settings (key, value) VALUES ('schedule_lead_ms', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [String(v)]
+  )
+  leadMs = v
+}
+
+export function getTimingLabel() {
+  if (leadMs > 0) return `${leadMs} ms early`
+  if (leadMs < 0) return `${-leadMs} ms delayed`
+  return 'exactly on time (0 ms)'
+}
+
+// "+Schedule early=2500" / "+Schedule delay=3s"  ->  { lead } | { error } | null
+function parseTiming(text) {
+  const m = String(text).trim().match(/^\+schedule\s+(early|delay)\s*=\s*(\d+(?:\.\d+)?)\s*(ms|s)?\s*$/i)
+  if (!m) return null
+  let ms = Math.round(Number(m[2]) * (m[3] && m[3].toLowerCase() === 's' ? 1000 : 1))
+  if (!Number.isFinite(ms) || ms < 0 || ms > MAX_TIMING_MS) {
+    return { error: `Timing must be between 0 and ${MAX_TIMING_MS} ms.` }
+  }
+  return { lead: m[1].toLowerCase() === 'early' ? ms : -ms }
+}
+
 // ─── commands ─────────────────────────────────────────────────────────
 const HELP_HINT = 'Send *+Schedule help* for instructions.'
 
 export async function cmdSchedule(sock, m, text) {
   const jid = m.key.remoteJid
+
+  // +Schedule early=<ms>  /  +Schedule delay=<ms>
+  const timing = parseTiming(text)
+  if (timing) {
+    if (timing.error) {
+      await sock.sendMessage(jid, { text: `⚠️ ${timing.error}\n${HELP_HINT}` }, { quoted: m })
+      return
+    }
+    await saveLead(timing.lead)
+    await sock.sendMessage(
+      jid,
+      { text: `⏱️ Scheduled messages will now be sent ${getTimingLabel()}.` },
+      { quoted: m }
+    )
+    console.log(`[schedule] timing set: ${getTimingLabel()}`)
+    return
+  }
+
   const p = parseScheduleCommand(text)
   if (p.error) {
     await sock.sendMessage(jid, { text: `⚠️ ${p.error}\n${HELP_HINT}` }, { quoted: m })
@@ -327,10 +391,13 @@ export async function cmdUnschedule(sock, m, args) {
 // ─── background sender ────────────────────────────────────────────────
 // WhatsApp delivery takes a few seconds, so each message is sent LEAD_MS
 // before its scheduled time so that it ARRIVES on the dot.
+const DEFAULT_LEAD_MS = 2500
+const MAX_TIMING_MS = 60 * 1000
 const envLead = process.env.ASADMD_SCHEDULE_LEAD_MS
-const LEAD_MS = envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : 3500
+// > 0 = send that many ms early, < 0 = send that many ms late (delay)
+let leadMs =
+  envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : DEFAULT_LEAD_MS
 const TICK_MS = 5 * 1000
-const LOOKAHEAD_MS = 20 * 1000
 
 let online = false
 let timer = null
@@ -399,16 +466,17 @@ async function tick(getSock) {
   try {
     await ensureSchema()
     const now = Date.now()
+    const lookahead = Math.max(20 * 1000, leadMs + 10 * 1000)
     const due = await pool.query(
       `SELECT * FROM asadmd_schedules
        WHERE status = 'pending' AND send_at <= $1 ORDER BY send_at ASC LIMIT 50`,
-      [now + LOOKAHEAD_MS]
+      [now + lookahead]
     )
     let overdueSlot = 0
     for (const row of due.rows) {
       if (armed.has(row.id)) continue
       armed.add(row.id)
-      let wait = Number(row.send_at) - LEAD_MS - now
+      let wait = Number(row.send_at) - leadMs - now
       if (wait <= 0) {
         wait = overdueSlot * 1500 // already due: send now, staggered
         overdueSlot += 1
@@ -425,11 +493,12 @@ async function tick(getSock) {
 export function startScheduler(getSock) {
   if (timer) return
   ensureSchema()
+    .then(() => loadLead())
     .then(() =>
       // a crash mid-send leaves 'sending' rows: put them back in the queue
       pool.query(`UPDATE asadmd_schedules SET status = 'pending' WHERE status = 'sending'`)
     )
     .catch((e) => console.log(`[schedule] init error: ${e?.message || e}`))
   timer = setInterval(() => tick(getSock), TICK_MS)
-  console.log(`[schedule] scheduler started (sends ${LEAD_MS} ms early)`)
+  console.log(`[schedule] scheduler started (timing: ${getTimingLabel()})`)
 }
