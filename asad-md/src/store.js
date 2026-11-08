@@ -19,7 +19,7 @@ const pool = new Pool({
   idleTimeoutMillis: 30_000,
 })
 
-const TYPES = new Set(['text', 'voice', 'photo', 'video', 'sticker', 'gif', 'viewonce', 'other'])
+const TYPES = new Set(['text', 'voice', 'photo', 'video', 'sticker', 'gif', 'viewonce', 'other', 'call'])
 
 const str = (v) => (v === undefined || v === null ? null : String(v))
 const toMs = (ts) => {
@@ -98,6 +98,20 @@ export const store = {
     )
     const r = await pool.query('SELECT * FROM asadmd_messages WHERE id = $1', [String(msg.id)])
     return row(r.rows[0])
+  },
+
+  async getNameByJid(jids) {
+    await ensureSchema()
+    const list = (jids || []).filter(Boolean)
+    if (!list.length) return null
+    const r = await pool.query(
+      `SELECT sender_name FROM asadmd_messages
+       WHERE (sender_jid = ANY($1::text[]) OR chat_jid = ANY($1::text[]))
+         AND sender_name IS NOT NULL AND sender_name <> ''
+       ORDER BY timestamp DESC LIMIT 1`,
+      [list]
+    )
+    return r.rows[0]?.sender_name || null
   },
 
   async getMessageById(id) {

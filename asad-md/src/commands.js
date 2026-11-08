@@ -24,6 +24,8 @@ let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteA
 const BATCH_TTL_MS = 30 * 60 * 1000
 const CONFIRM_TTL_MS = 60 * 1000
 const SEPARATOR = '────────────────────────'
+// Short centered divider between different people's messages
+const CENTER_LINE = '                    ──────────'
 const HINT_BAR = '<><><><><><><><><><><><><><><><>'
 
 // ─── helpers ────────────────────────────────────────────────────────────
@@ -161,33 +163,35 @@ async function cmdShowNow(sock, m) {
     }
   }
 
-  const blockOrder = []
+  // One block per contact, numbered 1,2,3... in the order they appear now.
+  // Inside a block, consecutive messages from the same minute share one
+  // bold timestamp header.
+  const blocks = []
   const blockByKey = new Map()
-  let globalIndex = 0
   for (const r of all) {
-    globalIndex++
-    const displayLine = displayLineFor(r, voiceIndexByMsgId, viewOnceIndexByMsgId)
-    const line = `${displayLine}  • ${formatDisplayTime(r.timestamp)}`
     const key = r.sender_jid || r.sender_name
     let block = blockByKey.get(key)
     if (!block) {
-      block = { sender_name: r.sender_name, firstIndex: globalIndex, lines: [] }
+      block = { sender_name: r.sender_name, groups: [] }
       blockByKey.set(key, block)
-      blockOrder.push(block)
+      blocks.push(block)
     }
-    block.lines.push(line)
+    const stamp = formatPkt(r.timestamp)
+    const line = displayLineFor(r, voiceIndexByMsgId, viewOnceIndexByMsgId)
+    const last = block.groups[block.groups.length - 1]
+    if (last && last.stamp === stamp) last.lines.push(line)
+    else block.groups.push({ stamp, lines: [line] })
   }
 
-  const groupTexts = blockOrder.map(
-    (b) => `\`[${b.firstIndex}] ${b.sender_name}\`\n${b.lines.join('\n')}`
-  )
+  const groupTexts = blocks.map((b, i) => {
+    const parts = b.groups.map((g) => `*[ ${g.stamp} ]*\n${g.lines.join('\n')}`)
+    return `\`[${i + 1}] ${b.sender_name}\`\n${parts.join('\n')}`
+  })
 
   let body =
-    '*HERE IS YOUR RECENT MESSAGE HISTORY:*' +
-    '\n\n' +
     '*📝 MESSAGES:*' +
     '\n\n' +
-    groupTexts.join('\n\n') +
+    groupTexts.join('\n\n' + CENTER_LINE + '\n\n') +
     '\n' +
     SEPARATOR
 

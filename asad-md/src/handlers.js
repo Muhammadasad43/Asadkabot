@@ -62,6 +62,56 @@ async function recordEmptyEnvelope(m) {
   )
 }
 
+// ─── Voice / video call logging ───────────────────────────────────────
+// Baileys 'call' events: status = offer | ringing | accept | reject | timeout | terminate
+const callState = new Map() // callId -> { isVideo, result }
+
+export async function handleCall(sock, calls) {
+  for (const c of calls || []) {
+    try {
+      if (!c || !c.id) continue
+      const peer = c.chatId || c.from
+      if (!peer || c.isGroup || String(peer).endsWith('@g.us')) continue
+
+      const prev = callState.get(c.id) || {}
+      const isVideo = c.isVideo ?? prev.isVideo ?? false
+      let result = prev.result
+      switch (c.status) {
+        case 'offer':     result = 'Incoming'; break
+        case 'accept':    result = 'Answered'; break
+        case 'reject':    result = 'Declined'; break
+        case 'timeout':   result = 'Missed'; break
+        case 'terminate': result = prev.result === 'Answered' ? 'Answered' : 'Missed'; break
+        default: break // ringing etc.: no change
+      }
+      if (!result) result = 'Incoming'
+      callState.set(c.id, { isVideo, result })
+      if (callState.size > 500) callState.delete(callState.keys().next().value)
+
+      const from = c.from || peer
+      const name =
+        (await store.getNameByJid([from, peer])) || String(from).split('@')[0]
+      const when = c.date ? new Date(c.date).getTime() : Date.now()
+
+      await store.saveMessage({
+        id: `call:${c.id}`,
+        chat_jid: peer,
+        sender_jid: from,
+        sender_name: name,
+        timestamp: Number.isFinite(when) ? when : Date.now(),
+        type: 'call',
+        content: `${isVideo ? '🎥 Video call' : '📞 Voice call'} (${result})`,
+        media_path: null,
+        deleted: 0,
+        deleted_at: null,
+      })
+      console.log(`[call] ${name} → ${isVideo ? 'video' : 'voice'} call: ${result}`)
+    } catch (err) {
+      console.log(`[call] error: ${err?.message || err}`)
+    }
+  }
+}
+
 export async function handleUpsert(sock, messages, type) {
   for (const m of messages || []) {
     try {

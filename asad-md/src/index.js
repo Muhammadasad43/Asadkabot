@@ -361,6 +361,10 @@ async function start() {
     }
   });
 
+  sock.ev.on('call', async (calls) => {
+    await callModule('handlers', 'handleCall', sock, calls);
+  });
+
   sock.ev.on('messages.update', async (updates) => {
     await callModule('handlers', 'handleRevoke', sock, updates);
   });
