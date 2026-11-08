@@ -184,8 +184,13 @@ async function cmdShowNow(sock, m) {
   }
 
   const groupTexts = blocks.map((b, i) => {
-    const parts = b.groups.map((g) => `*[ ${g.stamp} ]*\n${g.lines.join('\n')}`)
-    return `\`[${i + 1}] ${b.sender_name}\`\n${parts.join('\n')}`
+    // Timestamp goes at the end of the FIRST line of each same-minute group;
+    // groups are separated by a blank line.
+    const parts = b.groups.map((g) => {
+      const [first, ...rest] = g.lines
+      return [`${first} [ ${g.stamp} ]`, ...rest].join('\n')
+    })
+    return `\`[${i + 1}] ${b.sender_name}\`\n\n${parts.join('\n\n')}`
   })
 
   let body =
