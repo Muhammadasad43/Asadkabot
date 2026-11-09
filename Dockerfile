@@ -8,6 +8,9 @@ RUN npm install --omit=dev
 
 FROM python:3.12-slim
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
+# ffmpeg is used by +SendVoiceAll to merge voice notes
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt .

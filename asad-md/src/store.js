@@ -45,6 +45,10 @@ async function ensureSchema() {
       deleted     INTEGER NOT NULL DEFAULT 0,
       deleted_at  BIGINT
     );
+    ALTER TABLE asadmd_messages ADD COLUMN IF NOT EXISTS chat_name TEXT;
+    ALTER TABLE asadmd_messages ADD COLUMN IF NOT EXISTS chat_kind TEXT;
+    ALTER TABLE asadmd_messages ADD COLUMN IF NOT EXISTS reason    TEXT;
+    ALTER TABLE asadmd_messages ADD COLUMN IF NOT EXISTS sender_pn TEXT;
     CREATE INDEX IF NOT EXISTS idx_asadmd_messages_timestamp ON asadmd_messages (timestamp);
     CREATE INDEX IF NOT EXISTS idx_asadmd_messages_sender    ON asadmd_messages (sender_jid);
     CREATE INDEX IF NOT EXISTS idx_asadmd_messages_deleted   ON asadmd_messages (deleted, deleted_at);
@@ -65,6 +69,10 @@ function row(r) {
         media_path: r.media_path,
         deleted: Number(r.deleted),
         deleted_at: r.deleted_at != null ? Number(r.deleted_at) : null,
+        chat_name: r.chat_name ?? null,
+        chat_kind: r.chat_kind ?? null,
+        reason: r.reason ?? null,
+        sender_pn: r.sender_pn ?? null,
       }
     : null
 }
@@ -76,13 +84,17 @@ export const store = {
     const type = TYPES.has(msg.type) ? msg.type : 'other'
     const isDeleted = msg.deleted ? 1 : 0
     await pool.query(
-      `INSERT INTO asadmd_messages (id, chat_jid, sender_jid, sender_name, timestamp, type, content, media_path, deleted, deleted_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      `INSERT INTO asadmd_messages (id, chat_jid, sender_jid, sender_name, timestamp, type, content, media_path, deleted, deleted_at, chat_name, chat_kind, reason, sender_pn)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT (id) DO UPDATE SET
          sender_name = COALESCE(EXCLUDED.sender_name, asadmd_messages.sender_name),
          type        = CASE WHEN EXCLUDED.type = 'other' THEN asadmd_messages.type ELSE EXCLUDED.type END,
          content     = COALESCE(EXCLUDED.content, asadmd_messages.content),
-         media_path  = COALESCE(EXCLUDED.media_path, asadmd_messages.media_path)`,
+         media_path  = COALESCE(EXCLUDED.media_path, asadmd_messages.media_path),
+         chat_name   = COALESCE(EXCLUDED.chat_name, asadmd_messages.chat_name),
+         chat_kind   = COALESCE(EXCLUDED.chat_kind, asadmd_messages.chat_kind),
+         reason      = COALESCE(EXCLUDED.reason, asadmd_messages.reason),
+         sender_pn   = COALESCE(EXCLUDED.sender_pn, asadmd_messages.sender_pn)`,
       [
         String(msg.id),
         str(msg.chat_jid),
@@ -94,6 +106,10 @@ export const store = {
         str(msg.media_path),
         isDeleted,
         isDeleted ? toMs(msg.deleted_at) : null,
+        str(msg.chat_name),
+        str(msg.chat_kind),
+        str(msg.reason),
+        str(msg.sender_pn),
       ]
     )
     const r = await pool.query('SELECT * FROM asadmd_messages WHERE id = $1', [String(msg.id)])

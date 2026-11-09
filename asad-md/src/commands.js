@@ -23,9 +23,20 @@ import fs from 'node:fs'
 import { store } from './store.js'
 import { cmdSchedule, cmdScheduleList, cmdUnschedule, getTimingLabel } from './schedule.js'
 import { welcomeText, helpFor, commandKey, HELP_TOKENS } from './help.js'
+import { cmdChatGPT } from './chatgpt.js'
+import { cmdChatHistory, cmdSendVoice, cmdSendVoiceAll } from './chathistory.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
 let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteAll*
+
+// "My own chat" can appear as a phone-number jid or a LID; treat both as the same chat.
+const userPartOf = (j) => String(j || '').split('@')[0].split(':')[0]
+let mineIds = new Set()
+let knownSelfJid = null
+function sameChat(a, b) {
+  if (a === b) return true
+  return mineIds.has(userPartOf(a)) && mineIds.has(userPartOf(b))
+}
 
 const BATCH_TTL_MS = 30 * 60 * 1000
 const CONFIRM_TTL_MS = 60 * 1000
@@ -131,6 +142,7 @@ async function cmdShowNow(sock, m) {
     return
   }
 
+  const everything = all
   all = all.filter(
     (r) =>
       r.chat_jid &&
@@ -141,7 +153,11 @@ async function cmdShowNow(sock, m) {
       !r.chat_jid.endsWith('@broadcast')
   )
 
-  if (all.length === 0) {
+  const groupRows = everything
+    .filter((r) => r.chat_kind === 'group' || r.chat_kind === 'channel')
+    .sort((a, b) => a.timestamp - b.timestamp)
+
+  if (all.length === 0 && groupRows.length === 0) {
     await sock.sendMessage(jid, { text: 'Nothing recorded yet.' }, { quoted: m })
     return
   }
@@ -198,12 +214,36 @@ async function cmdShowNow(sock, m) {
     return `\`[${i + 1}] ${b.sender_name}\`\n\n${parts.join('\n\n')}`
   })
 
-  let body =
-    '*📝 MESSAGES:*' +
-    '\n\n' +
-    groupTexts.join('\n\n' + CENTER_LINE + '\n\n') +
-    '\n' +
-    SEPARATOR
+  // Groups / channels / communities: only messages that mention me, say my
+  // name, contain my number, or reply to me.
+  const chatMap = new Map()
+  for (const r of groupRows) {
+    let c = chatMap.get(r.chat_jid)
+    if (!c) chatMap.set(r.chat_jid, (c = { name: r.chat_name || userPartOf(r.chat_jid), groups: [] }))
+    c.name = r.chat_name || c.name
+    const base = r.type === 'voice' ? '🎤 Voice note' : r.type === 'viewonce' ? `📷 ${r.content}` : r.content
+    const line = `${r.sender_name || userPartOf(r.sender_jid)}: ${base}${r.deleted === 1 ? '  (Deleted Message)' : ''}`
+    const stamp = formatPkt(r.timestamp)
+    const last = c.groups[c.groups.length - 1]
+    if (last && last.stamp === stamp) last.lines.push(line)
+    else c.groups.push({ stamp, lines: [line] })
+  }
+  const chatTexts = [...chatMap.values()].map((c, i) => {
+    const parts = c.groups.map((g) => {
+      const [first, ...rest] = g.lines
+      return [`${first} [ ${g.stamp} ]`, ...rest].join('\n')
+    })
+    return `\`[G${i + 1}] ${c.name}\`\n\n${parts.join('\n\n')}`
+  })
+
+  let body = '*📝 MESSAGES:*' + '\n\n' + groupTexts.join('\n\n' + CENTER_LINE + '\n\n')
+  if (chatTexts.length) {
+    body +=
+      (groupTexts.length ? '\n\n' : '') +
+      '*👥 GROUPS & CHANNELS:*\n\n' +
+      chatTexts.join('\n\n' + CENTER_LINE + '\n\n')
+  }
+  body += '\n' + SEPARATOR
 
   const trailing = []
 
@@ -245,7 +285,7 @@ async function cmdYesVoice(sock, m, cmdRaw) {
   }
   const N = parseInt(match[1], 10)
 
-  if (pendingVoiceBatch === null || pendingVoiceBatch.chatJid !== jid) {
+  if (pendingVoiceBatch === null || !sameChat(pendingVoiceBatch.chatJid, jid)) {
     await sock.sendMessage(jid, { text: 'Send ShowNow first to load the voice list.' }, { quoted: m })
     return
   }
@@ -292,7 +332,7 @@ async function cmdYesView(sock, m, cmdRaw) {
   }
   const N = parseInt(match[1], 10)
 
-  if (!pendingVoiceBatch || pendingVoiceBatch.chatJid !== jid) {
+  if (!pendingVoiceBatch || !sameChat(pendingVoiceBatch.chatJid, jid)) {
     await sock.sendMessage(jid, { text: 'Send ShowNow first to load the view-once list.' }, { quoted: m })
     return
   }
@@ -360,7 +400,7 @@ async function cmdDeleteAllChat(sock, m, args) {
     return
   }
 
-  if (!pendingConfirm || pendingConfirm.command !== 'deleteallchat' || pendingConfirm.chatJid !== jid) {
+  if (!pendingConfirm || pendingConfirm.command !== 'deleteallchat' || !sameChat(pendingConfirm.chatJid, jid)) {
     await sock.sendMessage(jid, { text: 'No pending DeleteAllChat to confirm. Send DeleteAllChat first.' }, { quoted: m })
     return
   }
@@ -407,7 +447,7 @@ async function cmdDeleteAllVoice(sock, m, args) {
     return
   }
 
-  if (!pendingConfirm || pendingConfirm.command !== 'deleteallvoice' || pendingConfirm.chatJid !== jid) {
+  if (!pendingConfirm || pendingConfirm.command !== 'deleteallvoice' || !sameChat(pendingConfirm.chatJid, jid)) {
     await sock.sendMessage(jid, { text: 'No pending DeleteAllVoice to confirm. Send DeleteAllVoice first.' }, { quoted: m })
     return
   }
@@ -455,50 +495,87 @@ async function cmdDeleteAllVoice(sock, m, args) {
 }
 
 // ─── dispatcher ─────────────────────────────────────────────────────────
-export async function handleCommand(sock, m, text) {
+// Commands typed in OTHER people's chats are strict: exact spelling/casing and
+// "-help" only. Anything else (like "+1") is silently ignored there.
+const STRICT_RE =
+  /^\+(?:ShowNow|Help|Schedule|ScheduleList|Unschedule|DeleteAllChat|DeleteAllVoice|ChatGPT|ChatHistory|SendVoiceAll|(?:YesVoice|YesView|SendVoice)\d+)$/
+
+// These show or change MY private data, so outside my own chat they answer in
+// my own chat instead of the chat they were typed in.
+const PRIVATE_KEYS = new Set([
+  'shownow', 'yesvoice', 'yesview', 'schedule', 'schedulelist',
+  'unschedule', 'deleteallchat', 'deleteallvoice',
+])
+
+function selfProxy(sock, m) {
+  const mine = `${userPartOf(sock.user?.id)}@s.whatsapp.net`
+  return { ...m, key: { ...m.key, remoteJid: knownSelfJid || mine, fromMe: true } }
+}
+
+export async function handleCommand(sock, m, text, ctx = { self: true }) {
   try {
+    const self = ctx.self !== false
+    mineIds = new Set([userPartOf(sock.user?.id), userPartOf(sock.user?.lid)].filter(Boolean))
+    if (self) knownSelfJid = m.key.remoteJid
+
     const tokens = text.trim().split(/\s+/)
     const cmdRaw = tokens[0]
     const args = tokens.slice(1)
-    const cmd = cmdRaw.toLowerCase() // commands are never case-sensitive
+
+    if (!self && !STRICT_RE.test(cmdRaw)) return // not a real command here: stay silent
+
+    const cmd = cmdRaw.toLowerCase() // in my own chat commands are never case-sensitive
     const key = commandKey(cmd)
-    const jid = m.key.remoteJid
+    const origin = m.key.remoteJid
+    const target = !self && PRIVATE_KEYS.has(key) ? selfProxy(sock, m) : m
+    const jid = target.key.remoteJid
+    const cctx = { self, selfJid: knownSelfJid || `${userPartOf(sock.user?.id)}@s.whatsapp.net` }
 
     // +Help  /  +Help <command>
     if (cmd === '+help') {
       const k = commandKey(args[0] || '')
-      let target = helpFor(k)
-      if (target && k === 'schedule') target += `\n\n*Current timing:* ${getTimingLabel()}`
-      await sock.sendMessage(jid, { text: target || welcomeText() }, { quoted: m })
+      let t = helpFor(k)
+      if (t && k === 'schedule') t += `\n\n*Current timing:* ${getTimingLabel()}`
+      await sock.sendMessage(origin, { text: t || welcomeText() }, { quoted: m })
       return
     }
 
-    // +<Command> help  (also -help, --help, -h, ?)
-    if (args.length > 0 && HELP_TOKENS.has(args[0].toLowerCase())) {
+    // "+<Command> help" (own chat: help/-help/--help/-h/?)  ·  other chats: "-help" only
+    const helpAsked =
+      args.length === 1 && (self ? HELP_TOKENS.has(args[0].toLowerCase()) : args[0] === '-help')
+    if (helpAsked) {
       let h = helpFor(key)
       if (h && key === 'schedule') h += `\n\n*Current timing:* ${getTimingLabel()}`
       if (h) {
-        await sock.sendMessage(jid, { text: h }, { quoted: m })
+        await sock.sendMessage(origin, { text: h }, { quoted: m })
         return
       }
     }
 
     if (cmd === '+shownow') {
-      await cmdShowNow(sock, m)
+      await cmdShowNow(sock, target)
     } else if (cmd.startsWith('+yesvoice')) {
-      await cmdYesVoice(sock, m, cmdRaw)
+      await cmdYesVoice(sock, target, cmdRaw)
     } else if (cmd.startsWith('+yesview')) {
-      await cmdYesView(sock, m, cmdRaw)
+      await cmdYesView(sock, target, cmdRaw)
     } else if (cmd === '+schedule') {
-      await cmdSchedule(sock, m, text)
+      await cmdSchedule(sock, target, text)
     } else if (cmd === '+schedulelist') {
-      await cmdScheduleList(sock, m)
+      await cmdScheduleList(sock, target)
     } else if (cmd === '+unschedule') {
-      await cmdUnschedule(sock, m, args)
+      await cmdUnschedule(sock, target, args)
     } else if (cmd === '+deleteallchat') {
-      await cmdDeleteAllChat(sock, m, args)
+      await cmdDeleteAllChat(sock, target, args)
     } else if (cmd === '+deleteallvoice') {
-      await cmdDeleteAllVoice(sock, m, args)
+      await cmdDeleteAllVoice(sock, target, args)
+    } else if (cmd === '+chatgpt') {
+      await cmdChatGPT(sock, m, text)
+    } else if (cmd === '+chathistory') {
+      await cmdChatHistory(sock, m, args, cctx)
+    } else if (cmd === '+sendvoiceall') {
+      await cmdSendVoiceAll(sock, m, cctx)
+    } else if (cmd.startsWith('+sendvoice')) {
+      await cmdSendVoice(sock, m, cmdRaw, cctx)
     } else {
       await sock.sendMessage(jid, { text: 'Unknown command. Send *+Help* to see all commands.' })
     }

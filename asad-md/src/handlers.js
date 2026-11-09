@@ -38,6 +38,95 @@ function isNonInboxJid(jid) {
   )
 }
 
+
+// ─── Group / channel / community filter ───────────────────────────────
+// Non-private chats are only logged when the message concerns ME:
+//   mention (@me) · my name · my number · a reply to something I sent.
+const userPart = (j) => String(j || '').split('@')[0].split(':')[0]
+const NAME_WORDS = (process.env.ASADMD_NAME_KEYWORDS || 'asad')
+  .split(',')
+  .map((w) => w.trim())
+  .filter(Boolean)
+const NAME_RE = NAME_WORDS.length
+  ? new RegExp(
+      `(?<![\\p{L}\\p{N}])(?:${NAME_WORDS.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`,
+      'iu'
+    )
+  : null
+
+function messageText(inner) {
+  return (
+    inner?.conversation ||
+    inner?.extendedTextMessage?.text ||
+    inner?.imageMessage?.caption ||
+    inner?.videoMessage?.caption ||
+    inner?.documentMessage?.caption ||
+    ''
+  )
+}
+
+function findContextInfo(inner) {
+  if (!inner || typeof inner !== 'object') return null
+  for (const v of Object.values(inner)) {
+    if (v && typeof v === 'object' && v.contextInfo) return v.contextInfo
+  }
+  return null
+}
+
+function numberRegex(pn) {
+  if (!pn) return null
+  const forms = [`\\+?${pn}`]
+  if (pn.startsWith('92') && pn.length >= 11) forms.push(`0?${pn.slice(2)}`) // local Pakistani form
+  return new RegExp(`(?<!\\d)(?:${forms.join('|')})(?!\\d)`)
+}
+
+// -> array of reasons ('mention' | 'name' | 'number' | 'reply'); empty = don't log
+export function whyAboutMe(sock, inner) {
+  const pn = userPart(sock.user?.id)
+  const mine = new Set([pn, userPart(sock.user?.lid)].filter(Boolean))
+  const reasons = []
+  const ctx = findContextInfo(inner)
+
+  if (Array.isArray(ctx?.mentionedJid) && ctx.mentionedJid.some((j) => mine.has(userPart(j)))) {
+    reasons.push('mention')
+  }
+  if (ctx?.participant && ctx.quotedMessage && mine.has(userPart(ctx.participant))) {
+    reasons.push('reply')
+  }
+  const text = messageText(inner)
+  if (text) {
+    if (NAME_RE && NAME_RE.test(text)) reasons.push('name')
+    const re = numberRegex(pn)
+    if (re && re.test(text.replace(/[\s\-()]/g, ''))) reasons.push('number')
+  }
+  return reasons
+}
+
+// first jid that is a phone-number jid -> digits
+function pnOf(...jids) {
+  for (const j of jids) {
+    if (j && String(j).endsWith('@s.whatsapp.net')) return userPart(j)
+  }
+  return null
+}
+
+const chatNameCache = new Map() // jid -> { name, at }
+async function chatNameFor(sock, jid) {
+  const hit = chatNameCache.get(jid)
+  if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.name
+  let name = null
+  try {
+    if (!String(jid).endsWith('@newsletter')) {
+      name = (await sock.groupMetadata(jid))?.subject || null
+    }
+  } catch {
+    /* no access / rate limited */
+  }
+  if (!name) name = String(jid).endsWith('@newsletter') ? 'Channel' : 'Group'
+  chatNameCache.set(jid, { name, at: Date.now() })
+  return name
+}
+
 // Logs an empty-envelope incoming message as a view-once placeholder.
 // Called when Baileys delivers count=1 but hasMsg=false on a personal chat.
 async function recordEmptyEnvelope(m) {
@@ -52,6 +141,8 @@ async function recordEmptyEnvelope(m) {
     sender_name: m.pushName || String(m.key.remoteJid).split('@')[0],
     timestamp: Number(m.messageTimestamp) * 1000,
     type: 'viewonce',
+    chat_kind: 'private',
+    sender_pn: pnOf(m.key.remoteJidAlt, m.key.participantAlt, m.key.remoteJid),
     content: 'Sent a view-once item (content unavailable)',
     media_path: null,
     deleted: 0,
@@ -120,13 +211,13 @@ export async function handleUpsert(sock, messages, type) {
       const jid = m.key.remoteJid
       if (!jid) continue
       if (jid === 'status@broadcast') continue
-      if (isNonInboxJid(jid)) continue
+      const nonInbox = isNonInboxJid(jid)
       if (m.key.fromMe === true) continue
 
       // Empty envelope from a personal contact — this is Baileys 7's
       // signature for a view-once message whose media key is withheld.
       if (!m.message) {
-        await recordEmptyEnvelope(m)
+        if (!nonInbox) await recordEmptyEnvelope(m)
         continue
       }
 
@@ -151,6 +242,16 @@ export async function handleUpsert(sock, messages, type) {
 
       const { inner, viewOnce } = unwrapMessage(m.message)
       if (!inner) continue
+
+      // Groups / channels / communities: only keep messages that concern me.
+      let reasons = []
+      if (nonInbox) {
+        reasons = whyAboutMe(sock, inner)
+        if (reasons.length === 0) continue
+      }
+      const chat_kind = !nonInbox ? 'private' : jid.endsWith('@newsletter') ? 'channel' : 'group'
+      const chat_name = nonInbox ? await chatNameFor(sock, jid) : null
+      const sender_pn = pnOf(m.key.participantAlt, m.key.remoteJidAlt, m.key.participant, jid)
 
       let msgType
       let content
@@ -208,11 +309,15 @@ export async function handleUpsert(sock, messages, type) {
         media_path: media_path || null,
         deleted: 0,
         deleted_at: null,
+        chat_name,
+        chat_kind,
+        reason: reasons.length ? reasons.join(',') : null,
+        sender_pn,
       })
 
       const savedTag = msgType === 'viewonce' && media_path ? ' [saved]' : ''
       console.log(
-        `[capture] ${sender_name} → ${msgType}: ${String(content).slice(0, 60)}${savedTag}`
+        `[capture] ${sender_name}${nonInbox ? ` @ ${chat_name} (${reasons.join('+')})` : ''} → ${msgType}: ${String(content).slice(0, 60)}${savedTag}`
       )
     } catch (err) {
       console.log(`[capture] error: ${err?.message || err}`)

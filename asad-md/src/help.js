@@ -83,6 +83,50 @@ export const COMMANDS = {
       '*Usage:*\n```+Unschedule <N>```\n\n' +
       '*Example:*\n```+Unschedule 5```',
   },
+  chatgpt: {
+    name: '+ChatGPT <question>',
+    short: 'Asks ChatGPT and posts the answer in the same chat.',
+    help:
+      '*📌 +ChatGPT*\n' +
+      'Asks the OpenAI GPT model (through Pollinations) your question.\n' +
+      'The answer is posted in the chat where you typed the command, marked with 🤖.\n' +
+      'It works in your own chat, in other people’s inboxes, and in groups.\n\n' +
+      '*Usage:*\n```+ChatGPT <question>```\n\n' +
+      '*Examples:*\n```+ChatGPT how to defeat AI```\n```+ChatGPT explain Wi-Fi in 3 lines```',
+  },
+  chathistory: {
+    name: '+ChatHistory [number]',
+    short: 'Shows saved messages and voice notes of a person (or everyone in your own chat).',
+    help:
+      '*📌 +ChatHistory*\n' +
+      'Shows every saved text and voice note, oldest first, with voices numbered.\n' +
+      'In your own chat it shows everything saved; in someone’s inbox it shows what they sent you.\n' +
+      'In a group, add their number. Private chats are never posted into a group: the result comes to your own chat.\n\n' +
+      '*Usage:*\n```+ChatHistory```\n```+ChatHistory <number>```\n\n' +
+      '*Examples:*\n```+ChatHistory +923048648492```\n```+ChatHistory 03048648492```\n\n' +
+      '*Then:* +SendVoice<N> or +SendVoiceAll',
+  },
+  sendvoice: {
+    name: '+SendVoice<N>',
+    short: 'Sends a voice note from the last +ChatHistory list.',
+    help:
+      '*📌 +SendVoice<N>*\n' +
+      'Sends the voice note with the number N from your last +ChatHistory result.\n' +
+      'Run +ChatHistory first, in the same chat. The list stays valid for 1 hour.\n' +
+      'In a group it is sent to your own chat, not into the group.\n\n' +
+      '*Usage:*\n```+SendVoice<N>```\n\n' +
+      '*Examples:*\n```+SendVoice1```\n```+SendVoice4```',
+  },
+  sendvoiceall: {
+    name: '+SendVoiceAll',
+    short: 'Merges all voices from the last +ChatHistory into one audio and sends it.',
+    help:
+      '*📌 +SendVoiceAll*\n' +
+      'Joins every voice note from your last +ChatHistory result into a single audio, oldest first.\n' +
+      'Run +ChatHistory first, in the same chat. Up to 100 voices can be merged at once.\n' +
+      'In a group it is sent to your own chat, not into the group.\n\n' +
+      '*Usage:*\n```+SendVoiceAll```',
+  },
   deleteallchat: {
     name: '+DeleteAllChat',
     short: 'Deletes all saved message records (asks you to confirm).',
@@ -125,6 +169,7 @@ export function welcomeText() {
     `${WELCOME_TITLE}\n` +
     `*Commands Prefix:*            +\n` +
     `*Commands List:*\n${list}\n\n` +
-    `For details on any command, add *help* after it. Example: \`+Schedule help\``
+    `For details on any command, add *help* after it. Example: \`+Schedule help\`\n\n` +
+    `_In other people’s chats, type commands exactly as written above (for example +ChatGPT) and use -help._`
   )
 }

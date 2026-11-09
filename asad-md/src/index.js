@@ -221,8 +221,9 @@ function toSeconds(ts) {
 }
 
 async function maybeRunCommand(sock, m) {
+  // Only messages sent from MY account count (fromMe) — nobody else can run commands.
   if (!m?.key?.fromMe || !m.message) return;
-  if (!isSelfChat(sock, m.key)) return;
+  const self = isSelfChat(sock, m.key);
 
   const text = getText(m.message).trim();
   if (!text.startsWith(PREFIX)) return;
@@ -236,7 +237,7 @@ async function maybeRunCommand(sock, m) {
     if (seenCommandIds.size > 500) seenCommandIds.delete(seenCommandIds.values().next().value);
   }
 
-  await callModule('commands', 'handleCommand', sock, m, text);
+  await callModule('commands', 'handleCommand', sock, m, text, { self });
 }
 
 // ---------- health endpoint ----------
