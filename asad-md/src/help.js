@@ -127,6 +127,15 @@ export const COMMANDS = {
       'It is sent to the chat where you typed the command.\n\n' +
       '*Usage:*\n```+SendVoiceAll```',
   },
+  takegroupid: {
+    name: '+TakeGroupID',
+    short: 'Lists every group you’re in with its numeric group ID.',
+    help:
+      '*📌 +TakeGroupID*\\n' +
+      'Lists every group you’re currently a participant of, with each one’s numeric WhatsApp ID.\\n' +
+      'Only works in your own chat.\\n\\n' +
+      '*Usage:*\\n```+TakeGroupID```',
+  },
   deleteallchat: {
     name: '+DeleteAllChat',
     short: 'Deletes all saved message records (asks you to confirm).',

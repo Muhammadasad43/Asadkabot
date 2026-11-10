@@ -9,6 +9,7 @@
 //   +Schedule <num> "msg" [time] — schedule a message (see schedule.js)
 //   +Schedule early=<ms> / delay=<ms> — send scheduled messages early/late
 //   +ScheduleList / +Unschedule <N> — list / cancel scheduled messages
+//   +TakeGroupID              — list every group you're in with its numeric ID
 //   +Help                     — command list; "+<Command> help" for details
 //   +DeleteAllChat            — confirms then wipes the messages table
 //   +DeleteAllChat confirm    — actually wipes
@@ -494,18 +495,57 @@ async function cmdDeleteAllVoice(sock, m, args) {
   console.log(`[cmd] +DeleteAllVoice — deleted ${deleted} files, ${failed} failed`)
 }
 
+// ─── +TakeGroupID ───────────────────────────────────────────────────────
+// Lists every group the linked account currently participates in, with
+// each group's numeric WhatsApp ID (the part before @g.us).
+async function cmdTakeGroupID(sock, m) {
+  const jid = m.key.remoteJid
+
+  let groups
+  try {
+    groups = await sock.groupFetchAllParticipating()
+  } catch (e) {
+    await sock.sendMessage(jid, { text: `Could not fetch groups: ${e.message}` }, { quoted: m })
+    console.log(`[cmd] +TakeGroupID error: ${e?.message || e}`)
+    return
+  }
+
+  const list = Object.values(groups || {})
+  if (list.length === 0) {
+    await sock.sendMessage(jid, { text: 'You are not in any groups.' }, { quoted: m })
+    return
+  }
+
+  list.sort((a, b) => (a.subject || '').localeCompare(b.subject || ''))
+
+  const lines = list.map((g, i) => {
+    const numericId = userPartOf(g.id) // strips '@g.us'
+    return `${i + 1}. *${g.subject || '(no name)'}*\n   ID: \`${numericId}\`\n   Full JID: \`${g.id}\``
+  })
+
+  const body = `*👥 YOUR GROUPS (Total: ${list.length}):*\n\n${lines.join('\n\n')}`
+
+  const chunks = chunkText(body)
+  for (let i = 0; i < chunks.length; i++) {
+    await sock.sendMessage(jid, { text: chunks[i] }, i === 0 ? { quoted: m } : {})
+    if (i < chunks.length - 1) await sleep(500)
+  }
+
+  console.log(`[cmd] +TakeGroupID — listed ${list.length} groups`)
+}
+
 // ─── dispatcher ─────────────────────────────────────────────────────────
 // Commands typed in OTHER people's chats are strict: exact spelling/casing and
 // "-help" only. Anything else (like "+1") is silently ignored there.
 const STRICT_RE =
-  /^\+(?:ShowNow|Help|Schedule|ScheduleList|Unschedule|DeleteAllChat|DeleteAllVoice|ChatGPT|ChatHistory|SendVoiceAll|(?:YesVoice|YesView|SendVoice)\d+)$/
+  /^\+(?:ShowNow|Help|Schedule|ScheduleList|Unschedule|DeleteAllChat|DeleteAllVoice|ChatGPT|ChatHistory|SendVoiceAll|TakeGroupID|(?:YesVoice|YesView|SendVoice)\d+)$/
 
 // Safe mode only (ASADMD_ALLOW_SHARE_IN_GROUPS=0): these show or change MY data,
 // so outside my own chat they answer in my own chat. By default every command
 // answers in the chat where it was typed.
 const PRIVATE_KEYS = new Set([
   'shownow', 'yesvoice', 'yesview', 'schedule', 'schedulelist',
-  'unschedule', 'deleteallchat', 'deleteallvoice',
+  'unschedule', 'deleteallchat', 'deleteallvoice', 'takegroupid',
 ])
 
 function selfProxy(sock, m) {
@@ -569,6 +609,8 @@ export async function handleCommand(sock, m, text, ctx = { self: true }) {
       await cmdDeleteAllChat(sock, target, args)
     } else if (cmd === '+deleteallvoice') {
       await cmdDeleteAllVoice(sock, target, args)
+    } else if (cmd === '+takegroupid') {
+      await cmdTakeGroupID(sock, target)
     } else if (cmd === '+chatgpt') {
       await cmdChatGPT(sock, m, text)
     } else if (cmd === '+chathistory') {
