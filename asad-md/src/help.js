@@ -101,7 +101,7 @@ export const COMMANDS = {
       '*📌 +ChatHistory*\n' +
       'Shows every saved text and voice note, oldest first, with voices numbered.\n' +
       'In your own chat it shows everything saved; in someone’s inbox it shows what they sent you.\n' +
-      'In a group, add their number. Private chats are never posted into a group: the result comes to your own chat.\n\n' +
+      'In a group, add their number. The result is posted in the chat where you typed the command.\n\n' +
       '*Usage:*\n```+ChatHistory```\n```+ChatHistory <number>```\n\n' +
       '*Examples:*\n```+ChatHistory +923048648492```\n```+ChatHistory 03048648492```\n\n' +
       '*Then:* +SendVoice<N> or +SendVoiceAll',
@@ -113,7 +113,7 @@ export const COMMANDS = {
       '*📌 +SendVoice<N>*\n' +
       'Sends the voice note with the number N from your last +ChatHistory result.\n' +
       'Run +ChatHistory first, in the same chat. The list stays valid for 1 hour.\n' +
-      'In a group it is sent to your own chat, not into the group.\n\n' +
+      'It is sent to the chat where you typed the command.\n\n' +
       '*Usage:*\n```+SendVoice<N>```\n\n' +
       '*Examples:*\n```+SendVoice1```\n```+SendVoice4```',
   },
@@ -124,7 +124,7 @@ export const COMMANDS = {
       '*📌 +SendVoiceAll*\n' +
       'Joins every voice note from your last +ChatHistory result into a single audio, oldest first.\n' +
       'Run +ChatHistory first, in the same chat. Up to 100 voices can be merged at once.\n' +
-      'In a group it is sent to your own chat, not into the group.\n\n' +
+      'It is sent to the chat where you typed the command.\n\n' +
       '*Usage:*\n```+SendVoiceAll```',
   },
   deleteallchat: {

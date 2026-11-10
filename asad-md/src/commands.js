@@ -24,7 +24,7 @@ import { store } from './store.js'
 import { cmdSchedule, cmdScheduleList, cmdUnschedule, getTimingLabel } from './schedule.js'
 import { welcomeText, helpFor, commandKey, HELP_TOKENS } from './help.js'
 import { cmdChatGPT } from './chatgpt.js'
-import { cmdChatHistory, cmdSendVoice, cmdSendVoiceAll } from './chathistory.js'
+import { cmdChatHistory, cmdSendVoice, cmdSendVoiceAll, ALLOW_SHARE } from './chathistory.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
 let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteAll*
@@ -500,8 +500,9 @@ async function cmdDeleteAllVoice(sock, m, args) {
 const STRICT_RE =
   /^\+(?:ShowNow|Help|Schedule|ScheduleList|Unschedule|DeleteAllChat|DeleteAllVoice|ChatGPT|ChatHistory|SendVoiceAll|(?:YesVoice|YesView|SendVoice)\d+)$/
 
-// These show or change MY private data, so outside my own chat they answer in
-// my own chat instead of the chat they were typed in.
+// Safe mode only (ASADMD_ALLOW_SHARE_IN_GROUPS=0): these show or change MY data,
+// so outside my own chat they answer in my own chat. By default every command
+// answers in the chat where it was typed.
 const PRIVATE_KEYS = new Set([
   'shownow', 'yesvoice', 'yesview', 'schedule', 'schedulelist',
   'unschedule', 'deleteallchat', 'deleteallvoice',
@@ -527,7 +528,7 @@ export async function handleCommand(sock, m, text, ctx = { self: true }) {
     const cmd = cmdRaw.toLowerCase() // in my own chat commands are never case-sensitive
     const key = commandKey(cmd)
     const origin = m.key.remoteJid
-    const target = !self && PRIVATE_KEYS.has(key) ? selfProxy(sock, m) : m
+    const target = !self && !ALLOW_SHARE && PRIVATE_KEYS.has(key) ? selfProxy(sock, m) : m
     const jid = target.key.remoteJid
     const cctx = { self, selfJid: knownSelfJid || `${userPartOf(sock.user?.id)}@s.whatsapp.net` }
 

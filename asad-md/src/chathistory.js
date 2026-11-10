@@ -1,9 +1,8 @@
 // src/chathistory.js — +ChatHistory, +SendVoice<N>, +SendVoiceAll
 //
-// Privacy rule: another person's saved private messages/voices are only posted
-// into (a) your own chat, or (b) that same person's inbox. If you run these
-// commands in a group, the result goes to your own chat instead — unless you
-// set ASADMD_ALLOW_SHARE_IN_GROUPS=1.
+// Output goes to the chat where the command was typed (default).
+// ASADMD_ALLOW_SHARE_IN_GROUPS=0 = safe mode: outside your own chat / that
+// person's inbox, results go to your own chat instead.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -12,7 +11,9 @@ import { spawn } from 'node:child_process'
 import { store } from './store.js'
 import { formatPkt, normalizePhone } from './schedule.js'
 
-const ALLOW_SHARE = process.env.ASADMD_ALLOW_SHARE_IN_GROUPS === '1'
+// Results are posted where the command was typed. Set ASADMD_ALLOW_SHARE_IN_GROUPS=0
+// to send results from other people's chats to your own chat instead.
+export const ALLOW_SHARE = process.env.ASADMD_ALLOW_SHARE_IN_GROUPS !== '0'
 const STATE_TTL_MS = 60 * 60 * 1000
 const MAX_MERGE = 100
 const CENTER_LINE = '                    ──────────'
