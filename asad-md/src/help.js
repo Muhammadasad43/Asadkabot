@@ -83,35 +83,6 @@ export const COMMANDS = {
       '*Usage:*\n```+Unschedule <N>```\n\n' +
       '*Example:*\n```+Unschedule 5```',
   },
-  takegroupid: {
-    name: '+TakegroupID',
-    short: 'Shows the numeric ID of the group you type it in and saves it for the course.',
-    help:
-      '*📌 +TakegroupID*\n' +
-      'Run it inside a group to get that group’s numeric ID.\n' +
-      'The group is also saved as the target for +WebDevCourse.\n' +
-      'It only works inside a group.\n\n' +
-      '*Usage:*\n```+TakegroupID```',
-  },
-  webdevcourse: {
-    name: '+WebDevCourse',
-    short: 'Sends the Web Development course playlist to your course group, video by video.',
-    help:
-      '*📌 +WebDevCourse*\n' +
-      'Sends every video of the playlist (title and link) to the course group, first video to last.\n' +
-      'It sends one video about every 8 seconds, and it continues by itself after a restart.\n' +
-      'Run it inside the group, or anywhere else to use the group saved by +TakegroupID.\n\n' +
-      '*Usage:*\n' +
-      '```+WebDevCourse``` start or continue\n' +
-      '```+WebDevCourse status``` how many are sent\n' +
-      '```+WebDevCourse stop``` pause\n' +
-      '```+WebDevCourse restart``` send again from video 1\n\n' +
-      '*One-time setup:* the playlist is read with the YouTube Data API.\n' +
-      '1. console.cloud.google.com → new project\n' +
-      '2. APIs & Services → Library → *YouTube Data API v3* → Enable\n' +
-      '3. Credentials → Create credentials → API key\n' +
-      '4. Render → Environment → add *YOUTUBE_API_KEY*',
-  },
   chatgpt: {
     name: '+ChatGPT <question>',
     short: 'Asks ChatGPT and posts the answer in the same chat.',
@@ -156,56 +127,14 @@ export const COMMANDS = {
       'It is sent to the chat where you typed the command.\n\n' +
       '*Usage:*\n```+SendVoiceAll```',
   },
-  sticker: {
-    name: '+Sticker',
-    short: 'Turns a photo, video or GIF into a sticker.',
+  takegroupid: {
+    name: '+TakeGroupID',
+    short: 'Lists every group you’re in with its numeric group ID.',
     help:
-      '*📌 +Sticker*\n' +
-      'Turns a photo, video or GIF into a WhatsApp sticker and sends it in the same chat.\n' +
-      'Reply to the photo or video with the command, or send the photo or video with the command as its caption.\n' +
-      'Videos and GIFs are cut to the first 6 seconds.\n\n' +
-      '*Usage:*\n```+Sticker```',
-  },
-  image: {
-    name: '+Image <prompt>',
-    short: 'Generates an AI picture from your description.',
-    help:
-      '*📌 +Image*\n' +
-      'Generates an image from your description (FLUX through Pollinations).\n' +
-      'The picture is sent in the chat where you typed the command and can take up to 30 seconds.\n' +
-      'Be descriptive for better results.\n\n' +
-      '*Usage:*\n```+Image <prompt>```\n\n' +
-      '*Examples:*\n```+Image a car flying in the sky```\n```+Image a red desert at sunset, cinematic```',
-  },
-  summary: {
-    name: '+Summary All',
-    short: 'Summarizes everything saved so far as key points.',
-    help:
-      '*📌 +Summary*\n' +
-      'Reads all saved messages and sends a summary as bullet points, grouped by person and group.\n' +
-      'Urgent items are listed under “Needs attention”.\n' +
-      'The saved text is sent to the ChatGPT service to be summarized, so it can take a minute.\n\n' +
-      '*Usage:*\n```+Summary All```',
-  },
-  export: {
-    name: '+Export',
-    short: 'Sends all saved messages as a text file.',
-    help:
-      '*📌 +Export*\n' +
-      'Sends every saved message as a .txt file, grouped by person and group, oldest first.\n' +
-      'Voice notes appear as “[Voice note]” lines, because the audio files are not included.\n' +
-      'Times are in Pakistan time (GMT+5).\n\n' +
-      '*Usage:*\n```+Export```',
-  },
-  stats: {
-    name: '+Stats',
-    short: 'Shows the bot’s numbers: saved messages, top senders, uptime.',
-    help:
-      '*📌 +Stats*\n' +
-      'Shows how many messages are saved (private, groups, by type), calls, and deleted messages.\n' +
-      'Also shows your top 5 senders, the busiest hour, voice files stored, and bot uptime and memory.\n' +
-      'Everything is counted from what the bot has saved so far.\n\n' +
-      '*Usage:*\n```+Stats```',
+      '*📌 +TakeGroupID*\\n' +
+      'Lists every group you’re currently a participant of, with each one’s numeric WhatsApp ID.\\n' +
+      'Only works in your own chat.\\n\\n' +
+      '*Usage:*\\n```+TakeGroupID```',
   },
   deleteallchat: {
     name: '+DeleteAllChat',
