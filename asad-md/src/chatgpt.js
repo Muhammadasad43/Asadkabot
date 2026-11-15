@@ -7,7 +7,7 @@ const SYSTEM_PROMPT =
   'Use plain text with WhatsApp formatting only (*bold*, _italic_), no markdown tables or headings.'
 
 // Same key loading as app.py: POLLINATIONS_API_KEY first, then any POLLINATION* var.
-export function loadKeys() {
+function loadKeys() {
   const keys = []
   const primary = (process.env.POLLINATIONS_API_KEY || '').trim()
   if (primary) keys.push(primary)
@@ -20,7 +20,7 @@ export function loadKeys() {
   return keys
 }
 
-export async function askChatGPT(query, system = SYSTEM_PROMPT) {
+export async function askChatGPT(query) {
   const model = process.env.ASADMD_CHATGPT_MODEL || 'openai'
   const attempts = [...loadKeys(), null] // null = try without a key as a last resort
   let lastErr = 'no response'
@@ -35,7 +35,7 @@ export async function askChatGPT(query, system = SYSTEM_PROMPT) {
         body: JSON.stringify({
           model,
           messages: [
-            { role: 'system', content: system },
+            { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: query },
           ],
           stream: false,

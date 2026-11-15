@@ -11,7 +11,6 @@
 
 import fs from 'node:fs';
 import { startScheduler, setSchedulerOnline } from './schedule.js';
-import { resumeCourse } from './course.js';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -212,13 +211,7 @@ function isSelfChat(sock, key) {
 
 function getText(message) {
   const content = normalizeMessageContent(message);
-  return (
-    content?.conversation ??
-    content?.extendedTextMessage?.text ??
-    content?.imageMessage?.caption ??
-    content?.videoMessage?.caption ??
-    ''
-  );
+  return content?.conversation ?? content?.extendedTextMessage?.text ?? '';
 }
 
 function toSeconds(ts) {
@@ -244,7 +237,7 @@ async function maybeRunCommand(sock, m) {
     if (seenCommandIds.size > 500) seenCommandIds.delete(seenCommandIds.values().next().value);
   }
 
-  await callModule('commands', 'handleCommand', sock, m, text, { self }, () => currentSock);
+  await callModule('commands', 'handleCommand', sock, m, text, { self });
 }
 
 // ---------- health endpoint ----------
@@ -396,7 +389,6 @@ process.on('unhandledRejection', (e) => {
 
 startHealthServer();
 startScheduler(() => currentSock);
-resumeCourse(() => currentSock);
 start().catch((e) => {
   console.error('[Asad MD] Fatal error while starting:', e);
   process.exit(1);

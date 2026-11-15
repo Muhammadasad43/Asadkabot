@@ -24,8 +24,6 @@ import { store } from './store.js'
 import { cmdSchedule, cmdScheduleList, cmdUnschedule, getTimingLabel } from './schedule.js'
 import { welcomeText, helpFor, commandKey, HELP_TOKENS } from './help.js'
 import { cmdChatGPT } from './chatgpt.js'
-import { cmdSticker, cmdImage, cmdSummary, cmdExport, cmdStats } from './extras.js'
-import { cmdTakeGroupID, cmdWebDevCourse } from './course.js'
 import { cmdChatHistory, cmdSendVoice, cmdSendVoiceAll, ALLOW_SHARE } from './chathistory.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
@@ -500,14 +498,14 @@ async function cmdDeleteAllVoice(sock, m, args) {
 // Commands typed in OTHER people's chats are strict: exact spelling/casing and
 // "-help" only. Anything else (like "+1") is silently ignored there.
 const STRICT_RE =
-  /^\+(?:ShowNow|Help|Schedule|ScheduleList|Unschedule|DeleteAllChat|DeleteAllVoice|ChatGPT|ChatHistory|Sticker|Image|Summary|Export|Stats|SendVoiceAll|TakegroupID|WebDevCourse|(?:YesVoice|YesView|SendVoice)\d+)$/
+  /^\+(?:ShowNow|Help|Schedule|ScheduleList|Unschedule|DeleteAllChat|DeleteAllVoice|ChatGPT|ChatHistory|SendVoiceAll|(?:YesVoice|YesView|SendVoice)\d+)$/
 
 // Safe mode only (ASADMD_ALLOW_SHARE_IN_GROUPS=0): these show or change MY data,
 // so outside my own chat they answer in my own chat. By default every command
 // answers in the chat where it was typed.
 const PRIVATE_KEYS = new Set([
   'shownow', 'yesvoice', 'yesview', 'schedule', 'schedulelist',
-  'unschedule', 'deleteallchat', 'deleteallvoice', 'summary', 'export', 'stats',
+  'unschedule', 'deleteallchat', 'deleteallvoice',
 ])
 
 function selfProxy(sock, m) {
@@ -515,7 +513,7 @@ function selfProxy(sock, m) {
   return { ...m, key: { ...m.key, remoteJid: knownSelfJid || mine, fromMe: true } }
 }
 
-export async function handleCommand(sock, m, text, ctx = { self: true }, getSock = () => null) {
+export async function handleCommand(sock, m, text, ctx = { self: true }) {
   try {
     const self = ctx.self !== false
     mineIds = new Set([userPartOf(sock.user?.id), userPartOf(sock.user?.lid)].filter(Boolean))
@@ -571,24 +569,10 @@ export async function handleCommand(sock, m, text, ctx = { self: true }, getSock
       await cmdDeleteAllChat(sock, target, args)
     } else if (cmd === '+deleteallvoice') {
       await cmdDeleteAllVoice(sock, target, args)
-    } else if (cmd === '+takegroupid') {
-      await cmdTakeGroupID(sock, m)
-    } else if (cmd === '+webdevcourse') {
-      await cmdWebDevCourse(sock, m, args, cctx, getSock)
     } else if (cmd === '+chatgpt') {
       await cmdChatGPT(sock, m, text)
     } else if (cmd === '+chathistory') {
       await cmdChatHistory(sock, m, args, cctx)
-    } else if (cmd === '+sticker') {
-      await cmdSticker(sock, m)
-    } else if (cmd === '+image') {
-      await cmdImage(sock, m, text)
-    } else if (cmd === '+summary') {
-      await cmdSummary(sock, target, args)
-    } else if (cmd === '+export') {
-      await cmdExport(sock, target)
-    } else if (cmd === '+stats') {
-      await cmdStats(sock, target)
     } else if (cmd === '+sendvoiceall') {
       await cmdSendVoiceAll(sock, m, cctx)
     } else if (cmd.startsWith('+sendvoice')) {
