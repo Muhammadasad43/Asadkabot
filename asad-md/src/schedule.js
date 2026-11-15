@@ -403,6 +403,10 @@ let online = false
 let timer = null
 const armed = new Set() // schedule ids with a send timer already set
 
+export function isSchedulerOnline() {
+  return online
+}
+
 export function setSchedulerOnline(v) {
   online = Boolean(v)
 }
