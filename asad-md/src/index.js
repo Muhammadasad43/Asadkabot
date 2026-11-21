@@ -29,6 +29,7 @@ import makeWASocket, {
 
 import './store.js'; // side effect: creates schema on first import
 import { usePgAuthState, closePgAuth } from './auth-store.js';
+import { installShutdownFlush } from './persist.js';
 
 const PREFIX = '+';
 const MAX_COMMAND_AGE_SECONDS = 120;
@@ -377,11 +378,8 @@ async function start() {
   });
 }
 
-process.on('SIGINT', async () => {
-  console.log('\n[Asad MD] Shutting down.');
-  try { await closePgAuth(); } catch { /* non-fatal */ }
-  process.exit(0);
-});
+// On redeploy/stop (SIGTERM/SIGINT): copy everything waiting in memory to Postgres first.
+installShutdownFlush();
 
 process.on('unhandledRejection', (e) => {
   console.error('[Asad MD] Unhandled rejection:', e);

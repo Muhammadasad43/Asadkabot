@@ -8,6 +8,9 @@
 // NEVER start a bot reply with '+' (index.js treats those as commands).
 
 import { pool } from './store.js'
+import {
+  FLUSH_MS, RETRY_MS, readJson, writeJson, registerFlusher, throttledLog,
+} from './persist.js'
 
 const PKT_OFFSET_MS = 5 * 60 * 60 * 1000
 
@@ -213,7 +216,75 @@ export function parseScheduleCommand(text, nowMs = Date.now()) {
   return { digits, message, sendAt: when.ms, shifted: when.shifted }
 }
 
-// ─── database ─────────────────────────────────────────────────────────
+// ─── state: memory is the source of truth, Postgres is a lazy backup ───
+// Pending schedules live in memory and in ./data/schedules.json, so the
+// scheduler never touches the database while it waits (a free Neon database
+// can sleep) and keeps working when Postgres is down or out of quota.
+
+const schedules = new Map() // id -> row (pending/sending, plus finished rows until saved)
+const dirtyIds = new Set()  // ids whose latest state is not in Postgres yet
+let nextId = 1
+let leadDirty = false
+let dbLoaded = false
+let flushing = false
+let flushTimer = null
+let flushAt = 0
+
+const DEFAULT_LEAD_MS = 2500
+const MAX_TIMING_MS = 60 * 1000
+const envLead = process.env.ASADMD_SCHEDULE_LEAD_MS
+// > 0 = send that many ms early, < 0 = send that many ms late (delay)
+let leadMs =
+  envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : DEFAULT_LEAD_MS
+
+const isFinal = (status) => ['sent', 'failed', 'cancelled', 'missed'].includes(status)
+
+function saveLocal() {
+  try {
+    writeJson('schedules.json', {
+      rows: [...schedules.values()],
+      dirty: [...dirtyIds],
+      nextId,
+      lead: leadMs,
+      leadDirty,
+    })
+  } catch (e) {
+    throttledLog('sch-local', `[schedule] could not write local copy: ${e?.message || e}`, 60_000)
+  }
+}
+
+function touch(row) {
+  row.v = (row.v || 0) + 1
+  dirtyIds.add(row.id)
+  saveLocal()
+}
+
+function requestFlush(ms) {
+  const at = Date.now() + ms
+  if (flushTimer && flushAt <= at) return
+  if (flushTimer) clearTimeout(flushTimer)
+  flushAt = at
+  flushTimer = setTimeout(() => {
+    flushTimer = null
+    flushNow()
+  }, ms)
+}
+
+const toRow = (r) => ({
+  id: Number(r.id),
+  jid: r.jid,
+  phone: r.phone,
+  message: r.message,
+  send_at: Number(r.send_at),
+  status: r.status,
+  attempts: Number(r.attempts || 0),
+  notify_jid: r.notify_jid || null,
+  created_at: Number(r.created_at),
+  sent_at: r.sent_at != null ? Number(r.sent_at) : null,
+  error: r.error || null,
+  v: 0,
+})
+
 let schemaReady = false
 async function ensureSchema() {
   if (schemaReady) return
@@ -232,37 +303,118 @@ async function ensureSchema() {
       error      TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_asadmd_schedules_due ON asadmd_schedules (status, send_at);
+    CREATE TABLE IF NOT EXISTS asadmd_settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `)
   schemaReady = true
 }
 
-// ─── timing setting (saved in Postgres, survives restarts) ────────────
-async function ensureSettings() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS asadmd_settings (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    )
-  `)
+// pull pending schedules (and the saved timing) from Postgres into memory
+async function loadFromDb(keepLocalLead) {
+  await ensureSchema()
+  const r = await pool.query(`SELECT * FROM asadmd_schedules WHERE status IN ('pending','sending')`)
+  for (const x of r.rows) {
+    const id = Number(x.id)
+    if (!schedules.has(id)) schedules.set(id, toRow(x))
+  }
+  const mx = await pool.query('SELECT COALESCE(MAX(id), 0)::int AS m FROM asadmd_schedules')
+  nextId = Math.max(nextId, Number(mx.rows[0].m) + 1)
+  if (!keepLocalLead) {
+    const st = await pool.query(`SELECT value FROM asadmd_settings WHERE key = 'schedule_lead_ms'`)
+    if (st.rows[0] && Number.isFinite(Number(st.rows[0].value))) leadMs = Number(st.rows[0].value)
+  }
+  dbLoaded = true
 }
 
-async function loadLead() {
-  await ensureSettings()
-  const r = await pool.query(`SELECT value FROM asadmd_settings WHERE key = 'schedule_lead_ms'`)
-  if (r.rows[0]) {
-    const v = Number(r.rows[0].value)
-    if (Number.isFinite(v)) leadMs = v
+async function loadState() {
+  const local = readJson('schedules.json', null)
+  const localLeadDirty = Boolean(local?.leadDirty && Number.isFinite(local.lead))
+  try {
+    await loadFromDb(localLeadDirty)
+  } catch (e) {
+    console.log(`[schedule] Postgres unavailable (${e?.message || e}) — using the local copy`)
+    if (local) for (const x of local.rows || []) schedules.set(x.id, x)
+    if (local && Number.isFinite(local.lead)) leadMs = local.lead
+  }
+  if (local) {
+    // changes that never reached Postgres are newer than its rows
+    for (const id of local.dirty || []) {
+      const x = (local.rows || []).find((r) => r.id === id)
+      if (x) {
+        schedules.set(id, x)
+        dirtyIds.add(id)
+      }
+    }
+    if (localLeadDirty) {
+      leadMs = local.lead
+      leadDirty = true
+    }
+    nextId = Math.max(nextId, Number(local.nextId) || 1)
+  }
+  for (const x of schedules.values()) if (x.status === 'sending') x.status = 'pending' // crashed mid-send
+  saveLocal()
+  const pend = [...schedules.values()].filter((x) => x.status === 'pending').length
+  console.log(`[schedule] ready: ${pend} pending, timing ${getTimingLabel()}${dbLoaded ? '' : ' (Postgres offline)'}`)
+  if (dirtyIds.size || leadDirty || !dbLoaded) requestFlush(dbLoaded ? 5_000 : RETRY_MS)
+}
+
+async function flushNow() {
+  if (flushing) return
+  flushing = true
+  let failed = false
+  try {
+    if (dirtyIds.size === 0 && !leadDirty && dbLoaded) return
+    await ensureSchema()
+    if (!dbLoaded) await loadFromDb(leadDirty)
+
+    const batch = [...dirtyIds].map((id) => schedules.get(id)).filter(Boolean).map((r) => [r, r.v || 0])
+    if (batch.length) {
+      const col = (f) => batch.map(([r]) => r[f] ?? null)
+      await pool.query(
+        `INSERT INTO asadmd_schedules (id, jid, phone, message, send_at, status, attempts, notify_jid, created_at, sent_at, error)
+         SELECT * FROM unnest($1::int[], $2::text[], $3::text[], $4::text[], $5::bigint[], $6::text[],
+                              $7::int[], $8::text[], $9::bigint[], $10::bigint[], $11::text[])
+         ON CONFLICT (id) DO UPDATE SET
+           message = EXCLUDED.message, send_at = EXCLUDED.send_at, status = EXCLUDED.status,
+           attempts = EXCLUDED.attempts, sent_at = EXCLUDED.sent_at, error = EXCLUDED.error`,
+        [col('id'), col('jid'), col('phone'), col('message'), col('send_at'), col('status'),
+         col('attempts'), col('notify_jid'), col('created_at'), col('sent_at'), col('error')]
+      )
+    }
+    if (leadDirty) {
+      await pool.query(
+        `INSERT INTO asadmd_settings (key, value) VALUES ('schedule_lead_ms', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [String(leadMs)]
+      )
+      leadDirty = false
+    }
+    for (const [r, v] of batch) {
+      if ((r.v || 0) === v) {
+        dirtyIds.delete(r.id)
+        if (isFinal(r.status)) schedules.delete(r.id) // saved: no need to keep it in memory
+      }
+    }
+    saveLocal()
+  } catch (e) {
+    failed = true
+    throttledLog('sch-flush', `[schedule] Postgres unreachable — schedules kept safe locally, retrying (${e?.message || e})`)
+  } finally {
+    flushing = false
+    if (failed) requestFlush(RETRY_MS)
+    else if (dirtyIds.size > 0 || leadDirty) requestFlush(FLUSH_MS)
   }
 }
+registerFlusher('schedules', flushNow)
 
-async function saveLead(v) {
-  await ensureSettings()
-  await pool.query(
-    `INSERT INTO asadmd_settings (key, value) VALUES ('schedule_lead_ms', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [String(v)]
-  )
+// ─── timing setting ───────────────────────────────────────────────────
+function saveLead(v) {
   leadMs = v
+  leadDirty = true
+  saveLocal()
+  requestFlush(60_000)
 }
 
 export function getTimingLabel() {
@@ -295,7 +447,7 @@ export async function cmdSchedule(sock, m, text) {
       await sock.sendMessage(jid, { text: `⚠️ ${timing.error}\n${HELP_HINT}` }, { quoted: m })
       return
     }
-    await saveLead(timing.lead)
+    saveLead(timing.lead)
     await sock.sendMessage(
       jid,
       { text: `⏱️ Scheduled messages will now be sent ${getTimingLabel()}.` },
@@ -325,13 +477,16 @@ export async function cmdSchedule(sock, m, text) {
     /* lookup failed: keep the plain JID */
   }
 
-  await ensureSchema()
-  const r = await pool.query(
-    `INSERT INTO asadmd_schedules (jid, phone, message, send_at, notify_jid, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [targetJid, p.digits, p.message, p.sendAt, jid, Date.now()]
-  )
-  const id = r.rows[0].id
+  const id = nextId++
+  const row = {
+    id, jid: targetJid, phone: p.digits, message: p.message, send_at: p.sendAt,
+    status: 'pending', attempts: 0, notify_jid: jid, created_at: Date.now(),
+    sent_at: null, error: null, v: 0,
+  }
+  schedules.set(id, row)
+  touch(row)
+  requestFlush(60_000) // back it up to Postgres within a minute
+
   const preview = p.message.length > 200 ? p.message.slice(0, 200) + '…' : p.message
   await sock.sendMessage(
     jid,
@@ -349,22 +504,21 @@ export async function cmdSchedule(sock, m, text) {
 
 export async function cmdScheduleList(sock, m) {
   const jid = m.key.remoteJid
-  await ensureSchema()
-  const r = await pool.query(
-    `SELECT id, phone, message, send_at FROM asadmd_schedules
-     WHERE status = 'pending' ORDER BY send_at ASC LIMIT 50`
-  )
-  if (r.rows.length === 0) {
+  const pending = [...schedules.values()]
+    .filter((x) => x.status === 'pending')
+    .sort((a, b) => a.send_at - b.send_at)
+    .slice(0, 50)
+  if (pending.length === 0) {
     await sock.sendMessage(jid, { text: 'No pending scheduled messages.' }, { quoted: m })
     return
   }
-  const lines = r.rows.map((x) => {
+  const lines = pending.map((x) => {
     const pv = x.message.length > 40 ? x.message.slice(0, 40) + '…' : x.message
-    return `#${x.id} • +${x.phone}\n${formatPkt(Number(x.send_at))}\n"${pv}"`
+    return `#${x.id} • +${x.phone}\n${formatPkt(x.send_at)}\n"${pv}"`
   })
   await sock.sendMessage(
     jid,
-    { text: `*⏰ PENDING (${r.rows.length}):*\n\n${lines.join('\n\n')}` },
+    { text: `*⏰ PENDING (${pending.length}):*\n\n${lines.join('\n\n')}` },
     { quoted: m }
   )
 }
@@ -376,31 +530,29 @@ export async function cmdUnschedule(sock, m, args) {
     await sock.sendMessage(jid, { text: '⚠️ Give the schedule number. Send *+Unschedule help* for instructions.' }, { quoted: m })
     return
   }
-  await ensureSchema()
-  const r = await pool.query(
-    `UPDATE asadmd_schedules SET status = 'cancelled' WHERE id = $1 AND status = 'pending' RETURNING id`,
-    [id]
-  )
+  const row = schedules.get(id)
+  let cancelled = false
+  if (row && row.status === 'pending') {
+    row.status = 'cancelled'
+    touch(row)
+    requestFlush(60_000)
+    cancelled = true
+  }
   await sock.sendMessage(
     jid,
-    { text: r.rowCount ? `🗑️ Scheduled message #${id} cancelled.` : `⚠️ No pending schedule #${id}.` },
+    { text: cancelled ? `🗑️ Scheduled message #${id} cancelled.` : `⚠️ No pending schedule #${id}.` },
     { quoted: m }
   )
 }
 
 // ─── background sender ────────────────────────────────────────────────
-// WhatsApp delivery takes a few seconds, so each message is sent LEAD_MS
-// before its scheduled time so that it ARRIVES on the dot.
-const DEFAULT_LEAD_MS = 2500
-const MAX_TIMING_MS = 60 * 1000
-const envLead = process.env.ASADMD_SCHEDULE_LEAD_MS
-// > 0 = send that many ms early, < 0 = send that many ms late (delay)
-let leadMs =
-  envLead !== undefined && Number.isFinite(Number(envLead)) ? Number(envLead) : DEFAULT_LEAD_MS
+// WhatsApp delivery takes a few seconds, so each message is sent `leadMs`
+// before its scheduled time so that it ARRIVES on the dot. The tick only
+// looks at memory — it never queries the database.
 const TICK_MS = 5 * 1000
 
 let online = false
-let timer = null
+let started = false
 const armed = new Set() // schedule ids with a send timer already set
 
 export function setSchedulerOnline(v) {
@@ -419,27 +571,24 @@ async function fire(getSock, row) {
   armed.delete(row.id)
   const sock = getSock()
   if (!online || !sock) return // not connected: the next tick re-arms it
+  if (row.status !== 'pending') return // cancelled meanwhile
 
-  // claim it (a cancelled schedule is no longer 'pending', so it is skipped)
-  const claim = await pool.query(
-    `UPDATE asadmd_schedules SET status = 'sending' WHERE id = $1 AND status = 'pending' RETURNING id`,
-    [row.id]
-  )
-  if (!claim.rowCount) return
+  row.status = 'sending'
+  saveLocal()
 
-  const lateBy = Date.now() - Number(row.send_at)
+  const lateBy = Date.now() - row.send_at
   if (lateBy > 24 * 60 * 60 * 1000) {
-    await pool.query(`UPDATE asadmd_schedules SET status = 'missed' WHERE id = $1`, [row.id])
-    await notify(sock, row, `⚠️ Scheduled message #${row.id} to +${row.phone} was not sent (the bot was offline for over 24 hours past ${formatPkt(Number(row.send_at))}).`)
+    row.status = 'missed'
+    touch(row)
+    await notify(sock, row, `⚠️ Scheduled message #${row.id} to +${row.phone} was not sent (the bot was offline for over 24 hours past ${formatPkt(row.send_at)}).`)
     return
   }
 
   try {
     await sock.sendMessage(row.jid, { text: row.message })
-    await pool.query(
-      `UPDATE asadmd_schedules SET status = 'sent', sent_at = $2 WHERE id = $1`,
-      [row.id, Date.now()]
-    )
+    row.status = 'sent'
+    row.sent_at = Date.now()
+    touch(row)
     console.log(`[schedule] #${row.id} sent to +${row.phone}`)
     await notify(
       sock,
@@ -448,57 +597,46 @@ async function fire(getSock, row) {
         (lateBy > 2 * 60 * 1000 ? ' (late: the bot was offline)' : '')
     )
   } catch (e) {
-    const attempts = row.attempts + 1
-    const failed = attempts >= 3
-    await pool.query(
-      `UPDATE asadmd_schedules SET status = $2, attempts = $3, error = $4 WHERE id = $1`,
-      [row.id, failed ? 'failed' : 'pending', attempts, String(e?.message || e).slice(0, 300)]
-    )
-    console.log(`[schedule] #${row.id} send error (${attempts}/3): ${e?.message || e}`)
+    row.attempts += 1
+    const failed = row.attempts >= 3
+    row.status = failed ? 'failed' : 'pending'
+    row.error = String(e?.message || e).slice(0, 300)
+    touch(row)
+    console.log(`[schedule] #${row.id} send error (${row.attempts}/3): ${e?.message || e}`)
     if (failed) {
       await notify(sock, row, `❌ Scheduled message #${row.id} to +${row.phone} failed: ${e?.message || e}`)
     }
   }
 }
 
-async function tick(getSock) {
+function tick(getSock) {
   if (!online) return
-  try {
-    await ensureSchema()
-    const now = Date.now()
-    const lookahead = Math.max(20 * 1000, leadMs + 10 * 1000)
-    const due = await pool.query(
-      `SELECT * FROM asadmd_schedules
-       WHERE status = 'pending' AND send_at <= $1 ORDER BY send_at ASC LIMIT 50`,
-      [now + lookahead]
-    )
-    let overdueSlot = 0
-    for (const row of due.rows) {
-      if (armed.has(row.id)) continue
-      armed.add(row.id)
-      let wait = Number(row.send_at) - leadMs - now
-      if (wait <= 0) {
-        wait = overdueSlot * 1500 // already due: send now, staggered
-        overdueSlot += 1
-      }
-      setTimeout(() => {
-        fire(getSock, row).catch((e) => console.log(`[schedule] fire error: ${e?.message || e}`))
-      }, wait)
+  const now = Date.now()
+  const lookahead = Math.max(20 * 1000, leadMs + 10 * 1000)
+  const due = [...schedules.values()]
+    .filter((r) => r.status === 'pending' && r.send_at <= now + lookahead && !armed.has(r.id))
+    .sort((a, b) => a.send_at - b.send_at)
+  let overdueSlot = 0
+  for (const row of due) {
+    armed.add(row.id)
+    let wait = row.send_at - leadMs - now
+    if (wait <= 0) {
+      wait = overdueSlot * 1500 // already due: send now, staggered
+      overdueSlot += 1
     }
-  } catch (e) {
-    console.log(`[schedule] tick error: ${e?.message || e}`)
+    setTimeout(() => {
+      fire(getSock, row).catch((e) => console.log(`[schedule] fire error: ${e?.message || e}`))
+    }, wait)
   }
 }
 
 export function startScheduler(getSock) {
-  if (timer) return
-  ensureSchema()
-    .then(() => loadLead())
-    .then(() =>
-      // a crash mid-send leaves 'sending' rows: put them back in the queue
-      pool.query(`UPDATE asadmd_schedules SET status = 'pending' WHERE status = 'sending'`)
-    )
+  if (started) return
+  started = true
+  loadState()
     .catch((e) => console.log(`[schedule] init error: ${e?.message || e}`))
-  timer = setInterval(() => tick(getSock), TICK_MS)
-  console.log(`[schedule] scheduler started (timing: ${getTimingLabel()})`)
+    .finally(() => {
+      setInterval(() => tick(getSock), TICK_MS)
+      console.log(`[schedule] scheduler started (timing: ${getTimingLabel()})`)
+    })
 }
