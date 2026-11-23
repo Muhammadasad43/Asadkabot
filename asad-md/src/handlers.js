@@ -54,7 +54,7 @@ const NAME_RE = NAME_WORDS.length
     )
   : null
 
-function messageText(inner) {
+export function messageText(inner) {
   return (
     inner?.conversation ||
     inner?.extendedTextMessage?.text ||
@@ -65,7 +65,7 @@ function messageText(inner) {
   )
 }
 
-function findContextInfo(inner) {
+export function findContextInfo(inner) {
   if (!inner || typeof inner !== 'object') return null
   for (const v of Object.values(inner)) {
     if (v && typeof v === 'object' && v.contextInfo) return v.contextInfo
@@ -73,7 +73,7 @@ function findContextInfo(inner) {
   return null
 }
 
-function numberRegex(pn) {
+export function numberRegex(pn) {
   if (!pn) return null
   const forms = [`\\+?${pn}`]
   if (pn.startsWith('92') && pn.length >= 11) forms.push(`0?${pn.slice(2)}`) // local Pakistani form

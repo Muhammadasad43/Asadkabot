@@ -127,6 +127,48 @@ export const COMMANDS = {
       'It is sent to the chat where you typed the command.\n\n' +
       '*Usage:*\n```+SendVoiceAll```',
   },
+  takegroupid: {
+    name: '+TakeGroupID',
+    short: 'Lists every group you’re in with its numeric group ID.',
+    help:
+      '*📌 +TakeGroupID*\\n' +
+      'Lists every group you’re currently a participant of, with each one’s numeric WhatsApp ID.\\n' +
+      'Only works in your own chat.\\n\\n' +
+      '*Usage:*\\n```+TakeGroupID```',
+  },
+  linkdevice: {
+    name: '+LinkDevice <number>',
+    short: 'Links someone else\u2019s own WhatsApp as a separate, scoped device.',
+    help:
+      '*📌 +LinkDevice*\n' +
+      'Gives you a pairing code for the given number. THEY must enter it themselves on their own phone ' +
+      '(WhatsApp → Linked Devices → Link with phone number) — nothing is linked without their action.\n' +
+      'Once linked, they get their own commands (+ShowNow, +SetName, etc.) for their own data only. ' +
+      'You never see their messages.\n\n' +
+      '*Usage:*\n```+LinkDevice <number>```\n\n' +
+      '*Example:*\n```+LinkDevice 03048648492```\n\n' +
+      '*Related:* +DelinkDevice, +LinkedDevices',
+  },
+  delinkdevice: {
+    name: '+DelinkDevice <number>',
+    short: 'Unlinks a device and erases its saved data to free up server memory.',
+    help:
+      '*📌 +DelinkDevice*\n' +
+      'Logs out and disconnects a linked device, and deletes everything saved for that number.\n' +
+      'Use +LinkedDevices first to see which numbers are linked.\n\n' +
+      '*Usage:*\n```+DelinkDevice <number>```\n\n' +
+      '*Example:*\n```+DelinkDevice 03048648492```',
+  },
+  linkeddevices: {
+    name: '+LinkedDevices',
+    short: 'Lists every linked device and how much it has saved.',
+    help:
+      '*📌 +LinkedDevices*\n' +
+      'Shows every currently linked device: its number, name, status, and how many messages and voices it has saved.\n' +
+      'Content itself is never shown — only these counts.\n' +
+      `The limit is set by the ASADMD_MAX_DEVICES environment variable (default 3).\n\n` +
+      '*Usage:*\n```+LinkedDevices```',
+  },
   deleteallchat: {
     name: '+DeleteAllChat',
     short: 'Deletes all saved message records (asks you to confirm).',

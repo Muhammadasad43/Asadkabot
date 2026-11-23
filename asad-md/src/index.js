@@ -29,7 +29,7 @@ import makeWASocket, {
 
 import './store.js'; // side effect: creates schema on first import
 import { usePgAuthState, closePgAuth } from './auth-store.js';
-import { installShutdownFlush } from './persist.js';
+import { startLinkedDevices } from './devices.js';
 
 const PREFIX = '+';
 const MAX_COMMAND_AGE_SECONDS = 120;
@@ -378,8 +378,11 @@ async function start() {
   });
 }
 
-// On redeploy/stop (SIGTERM/SIGINT): copy everything waiting in memory to Postgres first.
-installShutdownFlush();
+process.on('SIGINT', async () => {
+  console.log('\n[Asad MD] Shutting down.');
+  try { await closePgAuth(); } catch { /* non-fatal */ }
+  process.exit(0);
+});
 
 process.on('unhandledRejection', (e) => {
   console.error('[Asad MD] Unhandled rejection:', e);
@@ -391,3 +394,6 @@ start().catch((e) => {
   console.error('[Asad MD] Fatal error while starting:', e);
   process.exit(1);
 });
+// Reconnect any devices linked with +LinkDevice before the last restart.
+// Wrapped so a problem here can never take down the main bot.
+startLinkedDevices().catch((e) => console.log('[devices] could not start linked devices:', e?.message || e));
