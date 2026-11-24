@@ -13,6 +13,8 @@
 //   +LinkDevice <num>         — link someone else's own WhatsApp as a scoped device
 //   +DelinkDevice <num>       — unlink a device and erase its saved data
 //   +LinkedDevices            — list currently linked devices
+//   +Backup <num|me>          — one-time download link: zip of saved messages + voices
+//   +ChangePrefix <symbol>    — change the command prefix (+ResetPrefix always works)
 //   +Help                     — command list; "+<Command> help" for details
 //   +DeleteAllChat            — confirms then wipes the messages table
 //   +DeleteAllChat confirm    — actually wipes
@@ -30,6 +32,8 @@ import { welcomeText, helpFor, commandKey, HELP_TOKENS } from './help.js'
 import { cmdChatGPT } from './chatgpt.js'
 import { cmdChatHistory, cmdSendVoice, cmdSendVoiceAll, ALLOW_SHARE } from './chathistory.js'
 import { cmdLinkDevice, cmdDelinkDevice, cmdLinkedDevices } from './devices.js'
+import { cmdBackup } from './backup.js'
+import { applyPrefix, getPrefix, setPrefix, validatePrefix, DEFAULT_PREFIX } from './settings.js'
 
 let pendingVoiceBatch = null // { voiceList, viewOnceList, chatJid, createdAt }
 let pendingConfirm = null    // { command, chatJid, createdAt } — for +DeleteAll*
@@ -285,7 +289,7 @@ async function cmdYesVoice(sock, m, cmdRaw) {
   const jid = m.key.remoteJid
   const match = /^\+yesvoice(\d+)$/i.exec(cmdRaw)
   if (!match) {
-    await sock.sendMessage(jid, { text: 'Give a voice number. Send *+YesVoice help* for instructions.' }, { quoted: m })
+    await sock.sendMessage(jid, { text: applyPrefix('Give a voice number. Send *+YesVoice help* for instructions.') }, { quoted: m })
     return
   }
   const N = parseInt(match[1], 10)
@@ -332,7 +336,7 @@ async function cmdYesView(sock, m, cmdRaw) {
   const jid = m.key.remoteJid
   const match = cmdRaw.match(/^\+yesview(\d+)$/i)
   if (!match) {
-    await sock.sendMessage(jid, { text: 'Give a view-once number. Send *+YesView help* for instructions.' }, { quoted: m })
+    await sock.sendMessage(jid, { text: applyPrefix('Give a view-once number. Send *+YesView help* for instructions.') }, { quoted: m })
     return
   }
   const N = parseInt(match[1], 10)
@@ -538,6 +542,40 @@ async function cmdTakeGroupID(sock, m) {
   console.log(`[cmd] +TakeGroupID — listed ${list.length} groups`)
 }
 
+// ─── +ChangePrefix / +ResetPrefix ───────────────────────────────────────
+async function cmdChangePrefix(sock, m, args) {
+  const jid = m.key.remoteJid
+  const reply = (text) => sock.sendMessage(jid, { text }, { quoted: m })
+  if (!args.length) {
+    return reply(
+      applyPrefix(`Current prefix: *${getPrefix()}*\nUsage: +ChangePrefix <symbol>   (example: +ChangePrefix .)\nSend *+ChangePrefix help* for the allowed symbols.`)
+    )
+  }
+  const v = validatePrefix(args.join(''))
+  if (!v) {
+    return reply('⚠️ A prefix must be 1–2 symbols from:  ! # $ % & + , - . / : ; = ? ^ |\nLetters, digits, spaces and * _ ~ ` @ are not allowed.')
+  }
+  const saved = await setPrefix(v)
+  await reply(
+    `✅ Command prefix is now *${v}*\n\n` +
+      `Type commands like ${v}ShowNow or ${v}Help from now on. The old prefix stops working` +
+      `${v === DEFAULT_PREFIX ? '' : ' (linked devices keep using +)'}.\n` +
+      `Forgot it? Send *+ResetPrefix* — that always works.` +
+      (saved ? '' : '\n\n⚠️ Could not save it to the database; it is active until the next restart.')
+  )
+  console.log(`[cmd] +ChangePrefix -> "${v}"`)
+}
+
+async function cmdResetPrefix(sock, m) {
+  const saved = await setPrefix(DEFAULT_PREFIX)
+  await sock.sendMessage(
+    m.key.remoteJid,
+    { text: `✅ Command prefix is back to *+*${saved ? '' : ' (could not save it to the database; it is active until the next restart)'}` },
+    { quoted: m }
+  )
+  console.log('[cmd] +ResetPrefix')
+}
+
 // ─── dispatcher ─────────────────────────────────────────────────────────
 // Commands typed in OTHER people's chats are strict: exact spelling/casing and
 // "-help" only. Anything else (like "+1") is silently ignored there.
@@ -621,6 +659,12 @@ export async function handleCommand(sock, m, text, ctx = { self: true }) {
       await cmdDelinkDevice(sock, m, args)
     } else if (cmd === '+linkeddevices') {
       await cmdLinkedDevices(sock, m)
+    } else if (cmd === '+backup') {
+      await cmdBackup(sock, m, args)
+    } else if (cmd === '+changeprefix') {
+      await cmdChangePrefix(sock, m, args)
+    } else if (cmd === '+resetprefix') {
+      await cmdResetPrefix(sock, m)
     } else if (cmd === '+chatgpt') {
       await cmdChatGPT(sock, m, text)
     } else if (cmd === '+chathistory') {
@@ -630,7 +674,7 @@ export async function handleCommand(sock, m, text, ctx = { self: true }) {
     } else if (cmd.startsWith('+sendvoice')) {
       await cmdSendVoice(sock, m, cmdRaw, cctx)
     } else {
-      await sock.sendMessage(jid, { text: 'Unknown command. Send *+Help* to see all commands.' })
+      await sock.sendMessage(jid, { text: applyPrefix('Unknown command. Send *+Help* to see all commands.') })
     }
   } catch (e) {
     console.log(`[cmd] error: ${e?.message || e}`)

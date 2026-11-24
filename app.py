@@ -1,8 +1,11 @@
 import os
+import re
 import json
+import time
+import threading
 import urllib.parse
 import requests
-from flask import Flask, render_template, request, Response
+from flask import Flask, render_template, request, Response, stream_with_context
 
 app = Flask(__name__)
 
@@ -167,6 +170,75 @@ def chat_stream():
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return Response(generate_pollinations(), mimetype='text/event-stream', headers=get_stream_headers())
+
+
+# =========================================================
+# ❤️ HEALTH + KEEP-ALIVE
+# Render's free plan puts a web service to sleep after ~15 minutes without
+# incoming web traffic, and that also stops the WhatsApp bot (linked devices
+# included). A tiny self-ping every 8 minutes keeps it awake.
+# Turn off with ASADMD_KEEPALIVE=0.
+# =========================================================
+@app.route('/health')
+def health():
+    return "ok", 200
+
+def _keepalive_loop(url):
+    time.sleep(60)
+    while True:
+        try:
+            requests.get(url + "/health", timeout=20)
+        except Exception as e:
+            print(f"[keepalive] ping failed: {e}")
+        time.sleep(480)
+
+_ka_url = (os.environ.get("ASADMD_PUBLIC_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "").rstrip("/")
+if _ka_url and os.environ.get("ASADMD_KEEPALIVE", "1") != "0":
+    threading.Thread(target=_keepalive_loop, args=(_ka_url,), daemon=True).start()
+    print(f"[keepalive] pinging {_ka_url}/health every 8 minutes")
+
+# =========================================================
+# 📦 BACKUP DOWNLOADS
+# The WhatsApp bot (Node) builds the zip and listens only on 127.0.0.1.
+# These routes just forward /backup/<token> to it, so the bot needs no public port.
+# =========================================================
+BACKUP_PORT = int(os.environ.get("ASADMD_BACKUP_PORT", "10001"))
+BACKUP_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+_PASS_HEADERS = {"content-type", "content-disposition", "cache-control",
+                 "x-robots-tag", "x-content-type-options", "retry-after"}
+
+def _proxy_backup(token, suffix=""):
+    if not BACKUP_TOKEN_RE.match(token):
+        return Response("Link not valid.", status=404, mimetype="text/plain")
+    try:
+        upstream = requests.get(
+            f"http://127.0.0.1:{BACKUP_PORT}/backup/{token}{suffix}",
+            stream=True,
+            timeout=(5, 120),
+            headers={"X-Forwarded-For": request.headers.get("X-Forwarded-For", request.remote_addr or "")},
+        )
+    except requests.RequestException:
+        return Response("The backup service is starting. Please try again in a minute.",
+                        status=503, mimetype="text/plain", headers={"Retry-After": "20"})
+
+    def body():
+        try:
+            for chunk in upstream.iter_content(chunk_size=65536):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    headers = {k: v for k, v in upstream.headers.items() if k.lower() in _PASS_HEADERS}
+    return Response(stream_with_context(body()), status=upstream.status_code, headers=headers)
+
+@app.route('/backup/<token>')
+def backup_page(token):
+    return _proxy_backup(token)
+
+@app.route('/backup/<token>/download')
+def backup_download(token):
+    return _proxy_backup(token, "/download")
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))

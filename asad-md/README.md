@@ -10,7 +10,7 @@ Everything stays on your device. Nothing is uploaded anywhere.
 | Archived voice notes | `./media/voice/` |
 | Message database (SQLite) | `./data/` |
 
-You control the bot by sending commands to yourself (your own "Message yourself" chat). The command prefix is `+`.
+You control the bot by sending commands to yourself (your own "Message yourself" chat). The command prefix is `+` by default; change it with `+ChangePrefix <symbol>` (if you forget it, `+ResetPrefix` always works).
 
 ## Requirements
 
@@ -104,3 +104,18 @@ asad-md/
     ├── commands.js  "+" commands
     └── media.js     media download and labelling
 ```
+
+## Linked devices, backups and prefix (cloud / Render build)
+
+| Command | What it does |
+| --- | --- |
+| `+LinkDevice <number>` | Gives a pairing code; the owner enters it on their own phone. You get a message when it is linked or if it fails. |
+| `+LinkedDevices` | Lists linked numbers, online/offline, and how much each has saved. |
+| `+Backup <number>` / `+Backup me` | Creates a private, expiring download link (default 30 min, 3 downloads) for ONE zip: `messages.txt`, `messages.json`, `voices/*.ogg`. Send the link to the owner. |
+| `+ChangePrefix <symbol>` | Changes the command prefix (1-2 symbols). `+ResetPrefix` always works. |
+
+Environment variables (all optional): `ASADMD_PUBLIC_URL` (Render sets `RENDER_EXTERNAL_URL` itself),
+`ASADMD_BACKUP_TTL_MIN` (default 30), `ASADMD_BACKUP_MAX_DOWNLOADS` (default 3), `ASADMD_PREFIX` (first-run prefix),
+`ASADMD_KEEPALIVE=0` (turn off the self-ping that stops Render's free plan from sleeping).
+
+Voice files live on the server's disk, which Render wipes on every redeploy - so a backup only contains voice notes received since the last deploy.

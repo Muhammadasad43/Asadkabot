@@ -29,9 +29,12 @@ import makeWASocket, {
 
 import './store.js'; // side effect: creates schema on first import
 import { usePgAuthState, closePgAuth } from './auth-store.js';
-import { startLinkedDevices } from './devices.js';
+import { startLinkedDevices, setMainSock } from './devices.js';
+import { loadSettings, toCanonical } from './settings.js';
+import { backupRouter, BACKUP_PORT } from './backup.js';
 
-const PREFIX = '+';
+// The command prefix is configurable (+ChangePrefix) and lives in settings.js.
+// toCanonical() turns "<prefix>Command" into "+Command" so commands.js stays unchanged.
 const MAX_COMMAND_AGE_SECONDS = 120;
 const logger = pino({ level: process.env.LOG_LEVEL || 'silent' });
 
@@ -226,8 +229,8 @@ async function maybeRunCommand(sock, m) {
   if (!m?.key?.fromMe || !m.message) return;
   const self = isSelfChat(sock, m.key);
 
-  const text = getText(m.message).trim();
-  if (!text.startsWith(PREFIX)) return;
+  const text = toCanonical(getText(m.message));
+  if (!text) return;
 
   const ts = toSeconds(m.messageTimestamp);
   if (ts && Date.now() / 1000 - ts > MAX_COMMAND_AGE_SECONDS) return;
@@ -244,10 +247,22 @@ async function maybeRunCommand(sock, m) {
 // ---------- health endpoint ----------
 
 function startHealthServer() {
-  // Embedded mode (inside another service that already owns $PORT):
-  // set ASADMD_EMBEDDED=1 to skip the health server.
-  if (process.env.ASADMD_EMBEDDED === '1') return;
+  // Embedded mode (inside another service that already owns $PORT, i.e. Render with
+  // Flask): no public server here. The backup download routes are served on a
+  // private loopback port and Flask forwards /backup/* to it.
+  if (process.env.ASADMD_EMBEDDED === '1') {
+    const inner = express();
+    inner.disable('x-powered-by');
+    inner.use(backupRouter());
+    const srv = inner.listen(BACKUP_PORT, '127.0.0.1', () => {
+      console.log(`[Asad MD] backup service on 127.0.0.1:${BACKUP_PORT}`);
+    });
+    srv.on('error', (e) => console.log(`[Asad MD] backup service could not start: ${e?.message || e}`));
+    return;
+  }
   const app = express();
+  app.disable('x-powered-by');
+  app.use(backupRouter());
   app.get('/health', (req, res) => res.status(200).send('ok'));
   app.get('/', (req, res) => res.status(200).send('Asad MD is running'));
   const port = Number(process.env.ASADMD_HEALTH_PORT || process.env.PORT) || 10000;
@@ -260,7 +275,13 @@ function startHealthServer() {
 
 let currentSock = null;
 
+let settingsLoaded = false;
+
 async function start() {
+  if (!settingsLoaded) {
+    settingsLoaded = true;
+    await loadSettings();
+  }
   const { state, saveCreds } = await useCachedPgAuthState();
 
   if (!state.creds.registered && !phoneNumber) {
@@ -323,6 +344,7 @@ async function start() {
 
     if (connection === 'open') {
       currentSock = sock;
+      setMainSock(sock);
       setSchedulerOnline(true);
       reconnectAttempts = 0;
       const ownJid = jidNormalizedUser(sock.user.id);

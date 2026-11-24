@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "check": "node --check src/index.js && node --check src/store.js && node --check src/auth-store.js && node --check src/handlers.js && node --check src/media.js && node --check src/commands.js",
+    "check": "node --check src/index.js && node --check src/store.js && node --check src/auth-store.js && node --check src/handlers.js && node --check src/media.js && node --check src/commands.js && node --check src/devices.js && node --check src/backup.js && node --check src/settings.js && node --check src/zip.js",
     "clean": "rm -rf auth-cache media data node_modules/.cache && echo cleaned"
   },
   "engines": {

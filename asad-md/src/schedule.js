@@ -8,6 +8,7 @@
 // NEVER start a bot reply with '+' (index.js treats those as commands).
 
 import { pool } from './store.js'
+import { applyPrefix } from './settings.js'
 
 const PKT_OFFSET_MS = 5 * 60 * 60 * 1000
 
@@ -292,7 +293,7 @@ export async function cmdSchedule(sock, m, text) {
   const timing = parseTiming(text)
   if (timing) {
     if (timing.error) {
-      await sock.sendMessage(jid, { text: `⚠️ ${timing.error}\n${HELP_HINT}` }, { quoted: m })
+      await sock.sendMessage(jid, { text: `⚠️ ${timing.error}\n${applyPrefix(HELP_HINT)}` }, { quoted: m })
       return
     }
     await saveLead(timing.lead)
@@ -307,7 +308,7 @@ export async function cmdSchedule(sock, m, text) {
 
   const p = parseScheduleCommand(text)
   if (p.error) {
-    await sock.sendMessage(jid, { text: `⚠️ ${p.error}\n${HELP_HINT}` }, { quoted: m })
+    await sock.sendMessage(jid, { text: `⚠️ ${p.error}\n${applyPrefix(HELP_HINT)}` }, { quoted: m })
     return
   }
 
@@ -373,7 +374,7 @@ export async function cmdUnschedule(sock, m, args) {
   const jid = m.key.remoteJid
   const id = Number(String(args[0] || '').replace(/^#/, ''))
   if (!Number.isInteger(id) || id <= 0) {
-    await sock.sendMessage(jid, { text: '⚠️ Give the schedule number. Send *+Unschedule help* for instructions.' }, { quoted: m })
+    await sock.sendMessage(jid, { text: applyPrefix('⚠️ Give the schedule number. Send *+Unschedule help* for instructions.') }, { quoted: m })
     return
   }
   await ensureSchema()

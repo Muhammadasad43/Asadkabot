@@ -1,6 +1,8 @@
 // src/chatgpt.js — +ChatGPT <question>
 // Uses the OpenAI GPT model served by Pollinations (same API/keys as the Flask app).
 
+import { applyPrefix } from './settings.js'
+
 const API_URL = 'https://gen.pollinations.ai/v1/chat/completions'
 const SYSTEM_PROMPT =
   'You are ChatGPT answering inside WhatsApp. Be clear and reasonably concise. ' +
@@ -78,7 +80,7 @@ export async function cmdChatGPT(sock, m, text) {
   const jid = m.key.remoteJid
   const query = String(text).replace(/^\+chatgpt\b/i, '').trim()
   if (!query) {
-    await sock.sendMessage(jid, { text: '⚠️ Write your question after the command. Send *+ChatGPT help* for instructions.' }, { quoted: m })
+    await sock.sendMessage(jid, { text: applyPrefix('⚠️ Write your question after the command. Send *+ChatGPT help* for instructions.') }, { quoted: m })
     return
   }
   try {

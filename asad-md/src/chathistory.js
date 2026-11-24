@@ -10,6 +10,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { store } from './store.js'
 import { formatPkt, normalizePhone } from './schedule.js'
+import { applyPrefix } from './settings.js'
 
 // Results are posted where the command was typed. Set ASADMD_ALLOW_SHARE_IN_GROUPS=0
 // to send results from other people's chats to your own chat instead.
@@ -45,7 +46,7 @@ function chunkText(text, max = 30000) {
 function lineFor(r, voiceNo) {
   let line
   if (r.type === 'voice') {
-    line = voiceNo ? `🎤 Voice note → +SendVoice${voiceNo}` : '🎤 Voice note (file no longer stored)'
+    line = voiceNo ? applyPrefix(`🎤 Voice note → +SendVoice${voiceNo}`) : '🎤 Voice note (file no longer stored)'
   } else if (r.type === 'viewonce') {
     line = `📷 ${r.content}`
   } else {
@@ -111,7 +112,7 @@ export async function cmdChatHistory(sock, m, args, ctx) {
 
   if (args.length > 0) {
     const digits = normalizePhone(args.join(''))
-    if (!digits) return reply('⚠️ I could not read that number. Send *+ChatHistory help* for instructions.')
+    if (!digits) return reply(applyPrefix('⚠️ I could not read that number. Send *+ChatHistory help* for instructions.'))
     const variants = await variantsForNumber(sock, digits)
     rows = all.filter((r) => rowMatches(r, variants))
     const here = new Set([userPart(origin), userPart(m.key.remoteJidAlt)].filter(Boolean))
@@ -124,7 +125,7 @@ export async function cmdChatHistory(sock, m, args, ctx) {
     rows = all.filter((r) => isPrivateRow(r) && rowMatches(r, variants))
     ownInbox = true
   } else {
-    return reply('⚠️ Add a number after the command. Send *+ChatHistory help* for instructions.')
+    return reply(applyPrefix('⚠️ Add a number after the command. Send *+ChatHistory help* for instructions.'))
   }
 
   const dest = resolveDest(sock, origin, ctx, ownInbox)
@@ -179,7 +180,7 @@ export async function cmdChatHistory(sock, m, args, ctx) {
     )
     parts.push('*👥 GROUPS & CHANNELS:*\n\n' + chatTexts.join('\n\n' + CENTER_LINE + '\n\n'))
   }
-  if (voices.length > 1) parts.push(`🎤 All ${voices.length} voices merged → +SendVoiceAll`)
+  if (voices.length > 1) parts.push(applyPrefix(`🎤 All ${voices.length} voices merged → +SendVoiceAll`))
 
   const chunks = chunkText(parts.join('\n\n'))
   for (let i = 0; i < chunks.length; i++) {
@@ -194,8 +195,8 @@ export async function cmdChatHistory(sock, m, args, ctx) {
 // ─── +SendVoice<N> ────────────────────────────────────────────────────
 function getState(origin) {
   const st = states.get(origin)
-  if (!st) return { error: 'Send *+ChatHistory* first to load the voice list.' }
-  if (Date.now() - st.createdAt > STATE_TTL_MS) return { error: 'Voice list expired. Send *+ChatHistory* again.' }
+  if (!st) return { error: applyPrefix('Send *+ChatHistory* first to load the voice list.') }
+  if (Date.now() - st.createdAt > STATE_TTL_MS) return { error: applyPrefix('Voice list expired. Send *+ChatHistory* again.') }
   return { st }
 }
 
@@ -203,12 +204,12 @@ export async function cmdSendVoice(sock, m, cmdRaw, ctx) {
   const origin = m.key.remoteJid
   const reply = (text) => sock.sendMessage(origin, { text }, { quoted: m })
   const match = /^\+sendvoice(\d+)$/i.exec(cmdRaw)
-  if (!match) return reply('⚠️ Give a voice number. Send *+SendVoice help* for instructions.')
+  if (!match) return reply(applyPrefix('⚠️ Give a voice number. Send *+SendVoice help* for instructions.'))
   const N = parseInt(match[1], 10)
 
   const { st, error } = getState(origin)
   if (error) return reply(error)
-  if (!st.voices.length) return reply('No voice notes in the last +ChatHistory result.')
+  if (!st.voices.length) return reply(applyPrefix('No voice notes in the last +ChatHistory result.'))
   if (N < 1 || N > st.voices.length) {
     return reply(`No voice #${N}. Available: 1 to ${st.voices.length}.`)
   }
@@ -271,7 +272,7 @@ export async function cmdSendVoiceAll(sock, m, ctx) {
   const { st, error } = getState(origin)
   if (error) return reply(error)
   const voices = st.voices.filter((v) => fs.existsSync(v.path))
-  if (!voices.length) return reply('No voice notes in the last +ChatHistory result.')
+  if (!voices.length) return reply(applyPrefix('No voice notes in the last +ChatHistory result.'))
   if (voices.length > MAX_MERGE) {
     return reply(`⚠️ ${voices.length} voices is too many to merge at once (max ${MAX_MERGE}).`)
   }

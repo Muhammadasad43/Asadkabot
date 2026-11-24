@@ -2,6 +2,8 @@
 //
 // Replies must never start with '+'.
 
+import { applyPrefix, getPrefix } from './settings.js'
+
 export const WELCOME_TITLE = '*`👾 Welcome to Asad MD Whatsapp Bot 👾`*'
 
 // key = lowercase command name without '+'
@@ -131,10 +133,10 @@ export const COMMANDS = {
     name: '+TakeGroupID',
     short: 'Lists every group you’re in with its numeric group ID.',
     help:
-      '*📌 +TakeGroupID*\\n' +
-      'Lists every group you’re currently a participant of, with each one’s numeric WhatsApp ID.\\n' +
-      'Only works in your own chat.\\n\\n' +
-      '*Usage:*\\n```+TakeGroupID```',
+      '*📌 +TakeGroupID*\n' +
+      'Lists every group you’re currently a participant of, with each one’s numeric WhatsApp ID.\n' +
+      'Only works in your own chat.\n\n' +
+      '*Usage:*\n```+TakeGroupID```',
   },
   linkdevice: {
     name: '+LinkDevice <number>',
@@ -169,6 +171,41 @@ export const COMMANDS = {
       `The limit is set by the ASADMD_MAX_DEVICES environment variable (default 3).\n\n` +
       '*Usage:*\n```+LinkedDevices```',
   },
+  backup: {
+    name: '+Backup <number|me>',
+    short: 'Makes a one-time download link (zip) with a person’s saved messages and voices.',
+    help:
+      '*📌 +Backup*\n' +
+      'Creates a private download link for a ZIP with everything saved for a linked device: ' +
+      'a readable messages.txt, messages.json and all voice notes still on the server.\n' +
+      'Send the link to the owner. They open it and tap *Download backup*.\n' +
+      'The link expires (30 minutes by default), allows only a few downloads, and cannot be guessed.\n' +
+      'Only works in your own chat. Use *+Backup me* for your own archive.\n\n' +
+      '*Usage:*\n```+Backup <number>```\n```+Backup me```\n\n' +
+      '*Example:*\n```+Backup 03048648492```\n\n' +
+      '*Related:* +LinkedDevices',
+  },
+  changeprefix: {
+    name: '+ChangePrefix <symbol>',
+    short: 'Changes the symbol your commands start with (default +).',
+    help:
+      '*📌 +ChangePrefix*\n' +
+      'Changes the symbol that starts your commands, in your own chat and in other chats.\n' +
+      'Use 1–2 symbols from: ! # $ % & + , - . / : ; = ? ^ |\n' +
+      'Letters, digits, spaces and the WhatsApp format characters * _ ~ ` @ are not allowed.\n' +
+      'The new prefix is saved and survives restarts. Linked devices keep using +.\n' +
+      'If you ever forget it, send *+ResetPrefix* — that one always works.\n\n' +
+      '*Usage:*\n```+ChangePrefix <symbol>```\n\n' +
+      '*Examples:*\n```+ChangePrefix .```\n```+ChangePrefix !```',
+  },
+  resetprefix: {
+    name: '+ResetPrefix',
+    short: 'Puts the command prefix back to + (works even if you forgot the prefix).',
+    help:
+      '*📌 +ResetPrefix*\n' +
+      'Sets the command prefix back to +. This command is always recognised, whatever prefix is active.\n\n' +
+      '*Usage:*\n```+ResetPrefix```',
+  },
   deleteallchat: {
     name: '+DeleteAllChat',
     short: 'Deletes all saved message records (asks you to confirm).',
@@ -199,7 +236,8 @@ export function commandKey(cmd) {
 }
 
 export function helpFor(key) {
-  return COMMANDS[key]?.help || null
+  const t = COMMANDS[key]?.help
+  return t ? applyPrefix(t) : null
 }
 
 export function welcomeText() {
@@ -207,9 +245,9 @@ export function welcomeText() {
     .map((c) => `• \`${c.name}\` — ${c.short}`)
     .concat('• `+Help` — Shows this list.')
     .join('\n')
-  return (
+  return applyPrefix(
     `${WELCOME_TITLE}\n` +
-    `*Commands Prefix:*            +\n` +
+    `*Commands Prefix:*            ${getPrefix()}\n` +
     `*Commands List:*\n${list}\n\n` +
     `For details on any command, add *help* after it. Example: \`+Schedule help\`\n\n` +
     `_In other people’s chats, type commands exactly as written above (for example +ChatGPT) and use -help._`

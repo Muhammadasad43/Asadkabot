@@ -131,7 +131,7 @@ async function deviceMarkDeleted(phone, id) {
   )
 }
 
-async function deviceGetAll(phone) {
+export async function deviceGetAll(phone) {
   await ensureSchema()
   const r = await pool.query(
     'SELECT * FROM asadmd_device_messages WHERE device_phone = $1 ORDER BY timestamp ASC',
@@ -209,12 +209,19 @@ async function useDeviceAuthState(phone) {
     },
   }
 
-  const saveCreds = async () => {
-    await pool.query(
+  // Saves run one after another, always writing the LATEST creds, so a slow database
+  // can never let an older snapshot overwrite a newer one.
+  let chain = Promise.resolve()
+  const writeCreds = () =>
+    pool.query(
       `INSERT INTO asadmd_device_auth (key, value, updated_at) VALUES ($1, $2::jsonb, $3)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
       [credsKey(phone), JSON.stringify(serialize(state.creds)), Date.now()]
     )
+  const saveCreds = () => {
+    const run = chain.then(writeCreds, writeCreds)
+    chain = run.catch(() => {})
+    return run
   }
 
   return { state, saveCreds }
@@ -226,7 +233,7 @@ async function wipeDeviceAuth(phone) {
 }
 
 // ─── device settings (name / save-all-groups) ────────────────────────────
-async function getDeviceRow(phone) {
+export async function getDeviceRow(phone) {
   await ensureSchema()
   const r = await pool.query('SELECT * FROM asadmd_devices WHERE phone = $1', [phone])
   return r.rows[0] || null
@@ -371,10 +378,95 @@ async function handleDeviceUpsert(phone, sock, row, messages) {
 }
 
 // ─── pairing / connection lifecycle ───────────────────────────────────
-async function connectDevice(phone, row, { fresh = false } = {}) {
-  const { state, saveCreds } = await useDeviceAuthState(phone)
-  let version
-  try { ({ version } = await fetchLatestBaileysVersion()) } catch { /* use library default */ }
+//
+// One "session" per linked number. Why sessions (this fixes "code arrives but the
+// other phone says Unable to connect"):
+//  • The login keys stay IN MEMORY for the whole life of the session and are reused
+//    on every reconnect. Before, each reconnect re-read them from Postgres, and
+//    WhatsApp's "restart right after pairing" (code 515) could read stale keys
+//    because the save to the (remote, sleepy) database had not finished yet.
+//  • Key saves are queued and awaited in order (see useDeviceAuthState).
+//  • If the connection drops while the code is still unused, a NEW code is
+//    requested on the new socket and sent to you, instead of silently leaving a
+//    dead code on the screen.
+//  • You get a message in your chat when the device is linked, or when pairing
+//    failed / timed out, with the reason code.
+const PAIR_WINDOW_MS = 4 * 60 * 1000 // a brand-new link may stay "pending" this long
+const MAX_CODE_REFRESH = 3
+const sessions = new Map() // phone -> session
+let mainSock = null
+
+export function setMainSock(s) {
+  mainSock = s
+}
+
+let waVersionCache = null
+async function getWaVersion() {
+  if (waVersionCache) return waVersionCache
+  try {
+    const r = await Promise.race([
+      fetchLatestBaileysVersion(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+    ])
+    waVersionCache = r.version
+  } catch { /* use library default */ }
+  return waVersionCache
+}
+
+async function notifyAdmin(session, text) {
+  if (!mainSock || !session?.adminJid) return
+  try {
+    await mainSock.sendMessage(session.adminJid, { text })
+  } catch (e) {
+    console.log(`[device ${session.phone}] could not notify admin: ${e?.message || e}`)
+  }
+}
+
+function teardownSocket(session) {
+  const old = session.sock
+  session.sock = null
+  session.online = false
+  if (old) {
+    try { old.ev.removeAllListeners('connection.update') } catch { /* ignore */ }
+    try { old.end(undefined) } catch { /* ignore */ }
+  }
+}
+
+async function stopSession(phone, { logout = false } = {}) {
+  const session = sessions.get(phone)
+  live.delete(phone)
+  if (!session) return
+  session.stopped = true
+  clearTimeout(session.pairTimer)
+  clearTimeout(session.retryTimer)
+  if (logout && session.sock) {
+    try { await session.sock.logout() } catch { /* ignore */ }
+  }
+  teardownSocket(session)
+  sessions.delete(phone)
+}
+
+async function failPairing(session, why) {
+  const phone = session.phone
+  console.log(`[device ${phone}] pairing failed: ${why}`)
+  await stopSession(phone)
+  await wipeDeviceAuth(phone).catch(() => {})
+  await setDeviceStatus(phone, 'delinked').catch(() => {})
+  await notifyAdmin(
+    session,
+    `⚠️ Linking +${phone} did not finish (${why}).\n` +
+      `Send *+LinkDevice ${phone}* again and have them enter the new code straight away.`
+  )
+}
+
+async function openSocket(session) {
+  const phone = session.phone
+  if (session.stopped) return
+  teardownSocket(session)
+
+  const { state, saveCreds } = session.auth
+  const version = await getWaVersion()
+  if (session.stopped) return
 
   const sock = makeWASocket({
     ...(version ? { version } : {}),
@@ -384,55 +476,103 @@ async function connectDevice(phone, row, { fresh = false } = {}) {
     markOnlineOnConnect: false,
     syncFullHistory: false,
     generateHighQualityLinkPreview: false,
+    connectTimeoutMs: 60_000,
+    keepAliveIntervalMs: 25_000,
+    defaultQueryTimeoutMs: 60_000,
     getMessage: async () => undefined,
   })
+  session.sock = sock
   live.set(phone, { sock })
+  let askedForCode = false
 
-  let pairingRequested = !fresh // only request a fresh code on a brand-new link
-  let attempts = 0
-  let pairingCodeResolve = null
-  const pairingCodePromise = fresh ? new Promise((res) => (pairingCodeResolve = res)) : null
-
-  sock.ev.on('creds.update', saveCreds)
+  sock.ev.on('creds.update', () => { saveCreds().catch((e) => console.log(`[device ${phone}] save creds failed: ${e?.message || e}`)) })
 
   sock.ev.on('connection.update', async (update) => {
+    if (session.sock !== sock || session.stopped) return // an older socket — ignore
     const { connection, lastDisconnect, qr } = update
-    if (qr && !sock.authState.creds.registered && !pairingRequested) {
-      pairingRequested = true
+
+    // WhatsApp only emits "qr" while the account is NOT logged in yet — that is the
+    // moment to ask for a pairing code (once per socket).
+    if (qr && session.pairing && !askedForCode) {
+      askedForCode = true
       try {
-        const code = await sock.requestPairingCode(phone)
-        const pretty = code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code
-        console.log(`[device ${phone}] pairing code: ${pretty}`)
-        if (pairingCodeResolve) pairingCodeResolve(pretty)
+        const raw = await sock.requestPairingCode(phone)
+        const code = raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw
+        console.log(`[device ${phone}] pairing code issued${session.codesIssued ? ' (refresh)' : ''}`)
+        session.codesIssued = (session.codesIssued || 0) + 1
+        if (session.codesIssued === 1) {
+          session.resolveCode?.(code)
+        } else {
+          await notifyAdmin(
+            session,
+            `🔄 The connection restarted before +${phone} entered the code.\n` +
+              `Use this NEW code instead: *${code}* (the old one no longer works).`
+          )
+        }
       } catch (e) {
-        pairingRequested = false
+        askedForCode = false
         console.log(`[device ${phone}] could not request pairing code: ${e?.message || e}`)
-        if (pairingCodeResolve) pairingCodeResolve(null)
+        if (!session.codesIssued) session.resolveCode?.(null)
       }
     }
+
     if (connection === 'open') {
-      attempts = 0
-      await setDeviceStatus(phone, 'linked')
+      session.online = true
+      session.attempts = 0
+      session.userName = sock.user?.name || null
+      await setDeviceStatus(phone, 'linked').catch(() => {})
       console.log(`[device ${phone}] linked and online`)
+      if (session.pairing) {
+        session.pairing = false
+        clearTimeout(session.pairTimer)
+        await notifyAdmin(session, `✅ +${phone} is now linked${session.userName ? ` (${session.userName})` : ''}. It stays connected while the server is running.`)
+      }
     }
+
     if (connection === 'close') {
+      session.online = false
       const statusCode = lastDisconnect?.error?.output?.statusCode
+      const msg = lastDisconnect?.error?.message
+      console.log(`[device ${phone}] connection closed (code ${statusCode ?? 'unknown'}${msg ? `: ${msg}` : ''})`)
       live.delete(phone)
-      if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.connectionReplaced) {
-        await setDeviceStatus(phone, 'delinked')
-        console.log(`[device ${phone}] logged out / replaced — not reconnecting`)
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        if (session.pairing) return failPairing(session, 'WhatsApp rejected the link, code 401')
+        await stopSession(phone)
+        await wipeDeviceAuth(phone).catch(() => {})
+        await setDeviceStatus(phone, 'delinked').catch(() => {})
+        await notifyAdmin(session, `⚠️ +${phone} removed this device from their WhatsApp (Linked Devices), so it was delinked. Their saved messages are kept for +Backup until you use +DelinkDevice.`)
         return
       }
-      const delay = statusCode === DisconnectReason.restartRequired ? 500 : Math.min(3000 * ++attempts, 30000)
-      setTimeout(() => {
-        connectDevice(phone, row).catch((e) => console.log(`[device ${phone}] reconnect failed: ${e?.message || e}`))
+      if (statusCode === DisconnectReason.connectionReplaced) {
+        await stopSession(phone)
+        await setDeviceStatus(phone, 'delinked').catch(() => {})
+        console.log(`[device ${phone}] replaced by another connection — not reconnecting`)
+        return
+      }
+
+      // Unused code and the socket died: allow a few fresh codes inside the window.
+      if (session.pairing) {
+        if (Date.now() - session.createdAt > PAIR_WINDOW_MS) return failPairing(session, 'time ran out')
+        if ((session.codesIssued || 0) > MAX_CODE_REFRESH) return failPairing(session, 'connection kept dropping')
+      }
+
+      // After a successful pairing WhatsApp asks for an immediate restart (515).
+      const delay =
+        statusCode === DisconnectReason.restartRequired
+          ? 300
+          : Math.min(2000 * ++session.attempts, 30000)
+      clearTimeout(session.retryTimer)
+      session.retryTimer = setTimeout(() => {
+        openSocket(session).catch((e) => console.log(`[device ${phone}] reconnect failed: ${e?.message || e}`))
       }, delay)
     }
   })
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (session.sock !== sock) return
     if (type !== 'notify') return
-    await handleDeviceUpsert(phone, sock, row, messages)
+    await handleDeviceUpsert(phone, sock, session.row, messages)
     for (const m of messages) {
       if (m?.key?.fromMe && m.message) {
         const text = (normalizeMessageContent(m.message)?.conversation ||
@@ -449,16 +589,49 @@ async function connectDevice(phone, row, { fresh = false } = {}) {
       }
     }
   })
+}
 
-  return pairingCodePromise
+async function createSession(row, { pairing, adminJid }) {
+  const phone = row.phone
+  await stopSession(phone) // never two sockets for one number
+  const auth = await useDeviceAuthState(phone)
+  const session = {
+    phone, row, auth, adminJid: adminJid || null,
+    pairing, createdAt: Date.now(), attempts: 0, codesIssued: 0,
+    sock: null, online: false, stopped: false,
+    resolveCode: null, pairTimer: null, retryTimer: null, userName: null,
+  }
+  sessions.set(phone, session)
+  if (pairing) {
+    // Give up (and free the memory) if nobody finishes the link in time.
+    session.pairTimer = setTimeout(() => {
+      if (session.pairing && !session.stopped) failPairing(session, 'nobody entered the code in time').catch(() => {})
+    }, PAIR_WINDOW_MS + 15_000)
+  }
+  return session
 }
 
 export async function startLinkedDevices() {
   await ensureSchema()
   const rows = await listDeviceRows()
-  const active = rows.filter((r) => r.status === 'pending' || r.status === 'linked')
+  // A "pending" row after a restart has a dead code — clean it so +LinkDevice works again.
+  for (const r of rows.filter((x) => x.status === 'pending')) {
+    await wipeDeviceAuth(r.phone).catch(() => {})
+    await setDeviceStatus(r.phone, 'delinked').catch(() => {})
+    console.log(`[device ${r.phone}] stale pending link cleaned up`)
+  }
+  const active = rows.filter((r) => r.status === 'linked')
+  let i = 0
   for (const row of active.slice(0, MAX_DEVICES)) {
-    connectDevice(row.phone, row).catch((e) => console.log(`[device ${row.phone}] start failed: ${e?.message || e}`))
+    const delay = i++ * 1500 // stagger so memory/CPU do not spike at boot
+    setTimeout(async () => {
+      try {
+        const session = await createSession(row, { pairing: false, adminJid: row.linked_by })
+        await openSocket(session)
+      } catch (e) {
+        console.log(`[device ${row.phone}] start failed: ${e?.message || e}`)
+      }
+    }, delay)
   }
   if (active.length) console.log(`[devices] reconnecting ${Math.min(active.length, MAX_DEVICES)} linked device(s)`)
 }
@@ -475,15 +648,20 @@ export async function cmdLinkDevice(sock, m, args) {
 
   await ensureSchema()
   const existing = await getDeviceRow(digits)
-  if (existing && (existing.status === 'pending' || existing.status === 'linked')) {
-    return reply(`⚠️ +${digits} is already ${existing.status}. Use +DelinkDevice first to re-link.`)
+  if (existing && existing.status === 'linked') {
+    return reply(`⚠️ +${digits} is already linked. Use +DelinkDevice first to re-link.`)
   }
   const rows = await listDeviceRows()
-  const activeCount = rows.filter((r) => r.status === 'pending' || r.status === 'linked').length
+  const activeCount = rows.filter((r) => r.phone !== digits && (r.status === 'pending' || r.status === 'linked')).length
   if (activeCount >= MAX_DEVICES) {
     return reply(`⚠️ Device limit reached (${MAX_DEVICES}). Delink one first, or raise ASADMD_MAX_DEVICES in Render.`)
   }
 
+  setMainSock(sock)
+  // A previous unfinished attempt for this number is simply replaced.
+  await stopSession(digits)
+  await wipeDeviceAuth(digits)
+  const row = { phone: digits, name: existing?.name ?? null, save_all_groups: existing?.save_all_groups ?? 0 }
   await pool.query(
     `INSERT INTO asadmd_devices (phone, status, linked_by, linked_at)
      VALUES ($1, 'pending', $2, $3)
@@ -491,17 +669,25 @@ export async function cmdLinkDevice(sock, m, args) {
     [digits, jid, Date.now()]
   )
 
-  const code = await connectDevice(digits, { phone: digits, name: null, save_all_groups: 0 }, { fresh: true })
+  const session = await createSession(row, { pairing: true, adminJid: jid })
+  const codePromise = new Promise((res) => (session.resolveCode = res))
+  openSocket(session).catch((e) => {
+    console.log(`[device ${digits}] start failed: ${e?.message || e}`)
+    session.resolveCode?.(null)
+  })
+  const code = await Promise.race([codePromise, new Promise((r) => setTimeout(() => r(null), 45_000))])
+
   if (!code) {
-    await setDeviceStatus(digits, 'delinked')
-    return reply(`⚠️ Could not get a pairing code for +${digits} right now. Try again in a minute.`)
+    await failPairing(session, 'no pairing code received from WhatsApp').catch(() => {})
+    return
   }
   await reply(
     `✅ Your code for linking the device is *${code}*\n\n` +
-    `Tell +${digits} to open WhatsApp → Linked Devices → Link with phone number, ` +
-    `and enter this code within 60 seconds. They'll then see only their own saved chats.`
+    `Tell +${digits} to open WhatsApp → Linked Devices → Link a device → *Link with phone number instead*, ` +
+    `and enter this code *within 60 seconds*. The phone must be online.\n` +
+    `I will message you here as soon as it is linked (or if it fails).`
   )
-  console.log(`[device ${digits}] pairing code issued`)
+  console.log(`[device ${digits}] pairing code sent to admin`)
 }
 
 export async function cmdDelinkDevice(sock, m, args) {
@@ -512,14 +698,10 @@ export async function cmdDelinkDevice(sock, m, args) {
 
   await ensureSchema()
   const row = await getDeviceRow(digits)
-  if (!row || row.status === 'delinked') return reply(`⚠️ +${digits} is not linked.`)
+  const hasData = row && ((await pool.query('SELECT 1 FROM asadmd_device_messages WHERE device_phone = $1 LIMIT 1', [digits])).rowCount > 0)
+  if (!row || (row.status === 'delinked' && !hasData)) return reply(`⚠️ +${digits} is not linked.`)
 
-  const entry = live.get(digits)
-  if (entry) {
-    try { await entry.sock.logout() } catch { /* ignore */ }
-    try { entry.sock.end?.() } catch { /* ignore */ }
-    live.delete(digits)
-  }
+  await stopSession(digits, { logout: true })
   await wipeDeviceAuth(digits)
   await deviceWipeMessages(digits)
   await setDeviceStatus(digits, 'delinked')
@@ -542,7 +724,8 @@ export async function cmdLinkedDevices(sock, m) {
       [r.phone]
     )
     const { msgs, voices } = c.rows[0]
-    return `*Device No.${i + 1}* +${r.phone}${r.name ? ` (${r.name})` : ''} — ${r.status} — ${msgs} messages, ${voices} voices`
+    const online = sessions.get(r.phone)?.online ? '🟢 online' : '🔴 offline'
+    return `*Device No.${i + 1}* +${r.phone}${r.name ? ` (${r.name})` : ''} — ${r.status}, ${online} — ${msgs} messages, ${voices} voices`
   }))
   await sock.sendMessage(
     jid,
